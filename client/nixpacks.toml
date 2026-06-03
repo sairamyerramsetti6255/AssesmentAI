@@ -1,0 +1,19 @@
+# Coolify / Nixpacks — set Base Directory to: client
+
+[variables]
+NODE_ENV = 'production'
+NIXPACKS_NODE_VERSION = '22'
+
+[phases.setup]
+nixPkgs = ['nodejs_22']
+
+[phases.install]
+dependsOn = ['setup']
+cmds = ['npm ci']
+
+[phases.build]
+dependsOn = ['install']
+cmds = ['npm run build']
+
+[start]
+cmd = 'npx --yes serve@14 dist -s -l 3000'
