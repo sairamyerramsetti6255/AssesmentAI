@@ -24,7 +24,32 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173', credentials: true }));
+function getAllowedOrigins(): string[] {
+  const fromList = (process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+  const client = process.env.CLIENT_URL?.trim().replace(/\/$/, '');
+  const origins = new Set<string>([...fromList, ...(client ? [client] : [])]);
+  if (origins.size === 0) origins.add('http://localhost:5173');
+  return [...origins];
+}
+
+const allowedOrigins = getAllowedOrigins();
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin.replace(/\/$/, ''))) {
+        callback(null, true);
+      } else {
+        console.warn(`CORS blocked origin: ${origin} (allowed: ${allowedOrigins.join(', ')})`);
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    credentials: true,
+  }),
+);
 app.use(express.json({ limit: '50mb' }));
 
 app.get('/api/health', (_req, res) => {

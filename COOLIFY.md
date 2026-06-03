@@ -29,7 +29,7 @@ Open your API application → **General** → set:
 PORT=3001
 GEMINI_API_KEY=your-key
 GEMINI_MODEL=gemini-2.5-flash
-CLIENT_URL=https://YOUR-FRONTEND-URL
+CLIENT_URL=https://assessment.graylogic.cloud
 ```
 
 Redeploy. Health: `https://YOUR-API-DOMAIN/api/health`
