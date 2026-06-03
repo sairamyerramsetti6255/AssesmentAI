@@ -1,7 +1,11 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import { GEMINI_MODEL, isGeminiConfigured } from './lib/gemini.js';
+import { getAllowedOrigins, isOriginAllowed } from './lib/corsConfig.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
 import assessmentRoutes from './routes/assessments.js';
@@ -21,33 +25,24 @@ import mastersRoutes from './routes/masters.js';
 
 dotenv.config();
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const PORT = process.env.PORT || 3001;
-
-function getAllowedOrigins(): string[] {
-  const fromList = (process.env.CORS_ORIGINS || '')
-    .split(',')
-    .map((s) => s.trim().replace(/\/$/, ''))
-    .filter(Boolean);
-  const client = process.env.CLIENT_URL?.trim().replace(/\/$/, '');
-  const origins = new Set<string>([...fromList, ...(client ? [client] : [])]);
-  if (origins.size === 0) origins.add('http://localhost:5173');
-  return [...origins];
-}
-
+const PORT = Number(process.env.PORT) || 3001;
 const allowedOrigins = getAllowedOrigins();
 
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin.replace(/\/$/, ''))) {
-        callback(null, true);
+      if (isOriginAllowed(origin, allowedOrigins)) {
+        callback(null, origin ?? true);
       } else {
-        console.warn(`CORS blocked origin: ${origin} (allowed: ${allowedOrigins.join(', ')})`);
-        callback(new Error('Not allowed by CORS'));
+        console.warn(`CORS blocked origin: ${origin}`);
+        callback(null, false);
       }
     },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   }),
 );
 app.use(express.json({ limit: '50mb' }));
@@ -58,6 +53,7 @@ app.get('/api/health', (_req, res) => {
     mode: 'memory',
     gemini: isGeminiConfigured(),
     gemini_model: isGeminiConfigured() ? GEMINI_MODEL : null,
+    cors_origins: allowedOrigins,
     timestamp: new Date().toISOString(),
   });
 });
@@ -79,12 +75,22 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin/audit-logs', auditRoutes);
 
+const publicDir = path.join(__dirname, '../public');
+const indexHtml = path.join(publicDir, 'index.html');
+if (process.env.SERVE_CLIENT !== 'false' && fs.existsSync(indexHtml)) {
+  app.use(express.static(publicDir));
+  app.get(/^(?!\/api).*/, (_req, res) => {
+    res.sendFile(indexHtml);
+  });
+}
+
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
   res.status(500).json({ error: err.message || 'Internal server error' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Pbshope AI Readiness API running on http://localhost:${PORT}`);
-  console.log('Mode: Demo (in-memory)');
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Assessment ai API on http://0.0.0.0:${PORT}`);
+  console.log(`CORS: ${allowedOrigins.join(', ')} + *.pbshope.in, *.graylogic.cloud`);
+  if (fs.existsSync(indexHtml)) console.log('Serving frontend from /public (same-origin, no CORS)');
 });
