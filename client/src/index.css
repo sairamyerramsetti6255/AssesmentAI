@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-navy: #111844;
+  --color-brand-primary: #4B5694;
+  --color-brand-slate: #7288AE;
+  --color-brand-cream: #EAE0CF;
+  --color-primary: #4B5694;
+  --color-primary-foreground: #ffffff;
+  --color-border: #EAE0CF;
+  --color-background: #ffffff;
+  --color-foreground: #111844;
+  --color-card: #ffffff;
+  --color-muted: #7288AE;
+  --radius: 0.75rem;
+}
+
+body {
+  @apply bg-white text-brand-navy antialiased;
+  font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.glass-card {
+  @apply rounded-2xl border border-brand-cream bg-white shadow-sm;
+  box-shadow: 0 1px 3px rgba(17, 24, 68, 0.06);
+}
+
+.page-hero {
+  @apply relative overflow-hidden rounded-2xl p-6 sm:p-8 bg-brand-navy text-white;
+}
+
+.wizard-hero {
+  @apply relative overflow-hidden rounded-2xl px-6 py-8 sm:px-8 bg-brand-navy text-white;
+}
+
+.wizard-card {
+  @apply rounded-2xl border border-brand-cream bg-white shadow-sm;
+}
+
+.nav-item-active {
+  background-color: #4B5694;
+  @apply text-white;
+}
+
+.btn-primary {
+  background-color: #4B5694;
+  @apply text-white hover:opacity-90;
+}
+
+.text-brand-link {
+  color: #4B5694;
+}
+
+.text-brand-link:hover {
+  color: #111844;
+}
+
+.bg-brand-soft {
+  background-color: #EAE0CF;
+}
+
+.bg-brand-soft-light {
+  background-color: rgba(234, 224, 207, 0.35);
+}
