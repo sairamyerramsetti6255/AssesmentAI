@@ -14,7 +14,7 @@ export function PageHeader({ title, subtitle, actions, hero }: PageHeaderProps) 
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{title}</h1>
-            {subtitle && <p className="mt-2 text-sm text-brand-slate">{subtitle}</p>}
+            {subtitle && <p className="mt-2 max-w-xl text-sm text-white/75">{subtitle}</p>}
           </div>
           {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
         </div>

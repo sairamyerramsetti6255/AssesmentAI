@@ -41,15 +41,24 @@ app.use(
       if (isOriginAllowed(origin, allowedOrigins)) {
         callback(null, origin ?? true);
       } else {
-        console.warn(`CORS blocked origin: ${origin}`);
+        console.warn(`CORS blocked origin: ${origin ?? '(none)'}`);
         callback(null, false);
       }
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    optionsSuccessStatus: 204,
   }),
 );
+
+/** Explicit preflight for browsers that hit API before route handlers */
+app.options('*', cors({
+  origin(origin, callback) {
+    callback(null, isOriginAllowed(origin, allowedOrigins) ? (origin ?? true) : false);
+  },
+  credentials: true,
+}));
 app.use(express.json({ limit: '50mb' }));
 
 app.get('/api/health', (_req, res) => {

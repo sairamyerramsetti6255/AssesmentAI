@@ -14,6 +14,7 @@ import ProposalPage from '@/pages/ProposalPage';
 import ReportsPage from '@/pages/ReportsPage';
 import AdminPage from '@/pages/AdminPage';
 import AuditPage from '@/pages/AuditPage';
+import ClientPortalPage from '@/pages/ClientPortalPage';
 import NotificationsPage from '@/pages/NotificationsPage';
 
 const qc = new QueryClient();
@@ -30,6 +31,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/client/:token" element={<ClientPortalPage />} />
       <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
       <Route path="/assessments" element={<PrivateRoute><AssessmentsPage /></PrivateRoute>} />
       <Route path="/assessments/new" element={<PrivateRoute roles={['super_admin', 'sales_manager']}><NewAssessmentPage /></PrivateRoute>} />
@@ -37,7 +39,7 @@ function AppRoutes() {
       <Route path="/assessments/:id/results" element={<PrivateRoute><ResultsPage /></PrivateRoute>} />
       <Route path="/assessments/:id/gap-analysis" element={<PrivateRoute roles={['super_admin', 'sales_manager']}><GapAnalysisPage /></PrivateRoute>} />
       <Route path="/assessments/:id/proposal" element={<PrivateRoute roles={['super_admin', 'sales_manager']}><ProposalPage /></PrivateRoute>} />
-      <Route path="/sessions/:id" element={<PrivateRoute roles={['super_admin', 'sales_rep']}><LiveSessionPage /></PrivateRoute>} />
+      <Route path="/sessions/:id" element={<PrivateRoute roles={['sales_rep']}><LiveSessionPage /></PrivateRoute>} />
       <Route path="/reports" element={<PrivateRoute roles={['super_admin', 'sales_manager']}><ReportsPage /></PrivateRoute>} />
       <Route path="/admin" element={<PrivateRoute roles={['super_admin']}><AdminPage /></PrivateRoute>} />
       <Route path="/audit" element={<PrivateRoute roles={['super_admin']}><AuditPage /></PrivateRoute>} />

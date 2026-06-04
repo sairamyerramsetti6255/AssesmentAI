@@ -1,4 +1,23 @@
 import { API_BASE_URL } from './config';
+import { isDemoMode } from './demoMode';
+import {
+  demoAllBenchmarks,
+  demoChat,
+  demoExpectedAnswer,
+  demoGenerateAll,
+  demoGenerateGap,
+  demoGeneratePackage,
+  demoGeneratePoc,
+  demoGenerateProposal,
+  demoGenerateQuestions,
+  demoGetGap,
+  demoGetPoc,
+  demoGetProposal,
+  demoGetResults,
+  demoScoreAssessment,
+  demoTranscribe,
+  mergeDemoQuestions,
+} from './demoApi';
 
 const API_URL = API_BASE_URL;
 
@@ -12,6 +31,11 @@ export interface User {
 
 class ApiClient {
   private token: string | null = localStorage.getItem('token');
+  private onUnauthorized: (() => void) | null = null;
+
+  setOnUnauthorized(handler: () => void) {
+    this.onUnauthorized = handler;
+  }
 
   setToken(token: string | null) {
     this.token = token;
@@ -32,13 +56,30 @@ class ApiClient {
     }
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
 
-    const res = await fetch(`${API_URL}${path}`, { ...options, headers });
+    let res: Response;
+    try {
+      res = await fetch(`${API_URL}${path}`, { ...options, headers });
+    } catch (err) {
+      const hint =
+        path.includes('/auth/login')
+          ? ' Login blocked by CORS or API offline. Redeploy the Node API with CLIENT_URL=https://assessment.pbshope.in and open /api/health.'
+          : '';
+      throw new Error(
+        `Cannot reach API at ${API_URL}${hint} ${err instanceof Error ? err.message : ''}`.trim(),
+      );
+    }
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: res.statusText }));
       if (res.status === 401) {
         this.setToken(null);
+        this.onUnauthorized?.();
       }
-      throw new Error(err.error || 'Request failed');
+      if (res.status === 404 && path.includes('/auth/login')) {
+        throw new Error(
+          'Login API not found (404). Your API domain may be serving nginx only — deploy the Node server from the server/ folder in Coolify and verify /api/health returns JSON.',
+        );
+      }
+      throw new Error(err.error || `Request failed (${res.status})`);
     }
     if (res.headers.get('content-type')?.includes('text/csv')) {
       return res.text() as unknown as T;
@@ -112,12 +153,47 @@ class ApiClient {
     }
   }
 
-  getQuestions(assessmentId: string) {
-    return this.request<Question[]>(`/assessments/${assessmentId}/questions`);
+  async getQuestions(assessmentId: string) {
+    const qs = await this.request<Question[]>(`/assessments/${assessmentId}/questions`);
+    return isDemoMode() ? mergeDemoQuestions(assessmentId, qs) : qs;
   }
 
   generateQuestions(assessmentId: string) {
+    if (isDemoMode()) return demoGenerateQuestions(assessmentId, this.getToken());
     return this.request<Question[]>(`/assessments/${assessmentId}/generate-questions`, { method: 'POST' });
+  }
+
+  generateAllBenchmarks(assessmentId: string) {
+    if (isDemoMode()) return Promise.resolve(demoAllBenchmarks(assessmentId));
+    return this.request<{ updated: number }>(`/assessments/${assessmentId}/generate-all-benchmarks`, { method: 'POST' });
+  }
+
+  clearGenericBenchmarks(assessmentId: string) {
+    return this.request<{ cleared: number }>(`/assessments/${assessmentId}/clear-generic-benchmarks`, { method: 'POST' });
+  }
+
+  approveAssessment(assessmentId: string) {
+    return this.request<Assessment>(`/assessments/${assessmentId}/approve`, { method: 'POST' });
+  }
+
+  /** Manager demo: score + gap + PoC + proposal without a live session. */
+  generateDemoPackage(assessmentId: string) {
+    if (isDemoMode()) return demoGeneratePackage(assessmentId, this.getToken());
+    return this.request<{
+      score: Score;
+      gap: GapAnalysis;
+      poc: PocPlan;
+      proposal: Proposal;
+    }>(`/assessments/${assessmentId}/demo-package`, { method: 'POST' });
+  }
+
+  /** One-shot: deep research + questions (benchmarks empty until you fill or AI Suggest). */
+  generateAll(assessmentId: string) {
+    if (isDemoMode()) return demoGenerateAll(assessmentId, this.getToken());
+    return this.request<{ research_notes: string; pain_point_ids: string[]; questions: Question[] }>(
+      `/assessments/${assessmentId}/generate-all`,
+      { method: 'POST' },
+    );
   }
 
   generateResearch(assessmentId: string, clientData?: Record<string, unknown>) {
@@ -139,7 +215,13 @@ class ApiClient {
     return this.request(`/assessments/${assessmentId}/questions/${questionId}`, { method: 'DELETE' });
   }
 
-  generateExpectedAnswer(assessmentId: string, questionId: string) {
+  async generateExpectedAnswer(assessmentId: string, questionId: string) {
+    if (isDemoMode()) {
+      const qs = await this.getQuestions(assessmentId);
+      const q = qs.find((x) => x.id === questionId);
+      const answer = demoExpectedAnswer(q?.question_text || 'this question');
+      return answer;
+    }
     return this.request<{ expected_answer: string }>(
       `/assessments/${assessmentId}/questions/${questionId}/generate-expected-answer`,
       { method: 'POST' },
@@ -171,6 +253,7 @@ class ApiClient {
   }
 
   transcribe(sessionId: string, data: { recording_id?: string; question_id: string; audio_base64?: string; mime_type?: string }) {
+    if (isDemoMode()) return Promise.resolve(demoTranscribe());
     return this.request<{ transcript: string }>(`/sessions/${sessionId}/transcribe`, { method: 'POST', body: JSON.stringify(data) });
   }
 
@@ -179,34 +262,74 @@ class ApiClient {
   }
 
   scoreAssessment(assessmentId: string) {
+    if (isDemoMode()) return demoScoreAssessment(assessmentId, this.getToken());
     return this.request<Score>(`/assessments/${assessmentId}/score`, { method: 'POST' });
   }
 
-  getResults(assessmentId: string) {
+  async getResults(assessmentId: string) {
+    if (isDemoMode()) {
+      try {
+        const r = await this.request<Results>(`/assessments/${assessmentId}/results`);
+        if (r.score) return r;
+      } catch {
+        /* use demo */
+      }
+      return demoGetResults(assessmentId, this.getToken());
+    }
     return this.request<Results>(`/assessments/${assessmentId}/results`);
   }
 
   generateGapAnalysis(assessmentId: string) {
+    if (isDemoMode()) return demoGenerateGap(assessmentId, this.getToken());
     return this.request<GapAnalysis>(`/assessments/${assessmentId}/gap-analysis`, { method: 'POST' });
   }
 
-  getGapAnalysis(assessmentId: string) {
+  async getGapAnalysis(assessmentId: string) {
+    if (isDemoMode()) {
+      try {
+        const g = await this.request<GapAnalysis | null>(`/assessments/${assessmentId}/gap-analysis`);
+        if (g?.gaps?.length) return g;
+      } catch {
+        /* demo */
+      }
+      return demoGetGap(assessmentId, this.getToken());
+    }
     return this.request<GapAnalysis | null>(`/assessments/${assessmentId}/gap-analysis`);
   }
 
   generatePoc(assessmentId: string) {
+    if (isDemoMode()) return demoGeneratePoc(assessmentId, this.getToken());
     return this.request<PocPlan>(`/assessments/${assessmentId}/poc-plan`, { method: 'POST' });
   }
 
-  getPoc(assessmentId: string) {
+  async getPoc(assessmentId: string) {
+    if (isDemoMode()) {
+      try {
+        const p = await this.request<PocPlan | null>(`/assessments/${assessmentId}/poc-plan`);
+        if (p?.content && Object.keys(p.content).length) return p;
+      } catch {
+        /* demo */
+      }
+      return demoGetPoc(assessmentId, this.getToken());
+    }
     return this.request<PocPlan | null>(`/assessments/${assessmentId}/poc-plan`);
   }
 
   generateProposal(assessmentId: string) {
+    if (isDemoMode()) return demoGenerateProposal(assessmentId, this.getToken());
     return this.request<Proposal>(`/assessments/${assessmentId}/proposal`, { method: 'POST' });
   }
 
-  getProposal(assessmentId: string) {
+  async getProposal(assessmentId: string) {
+    if (isDemoMode()) {
+      try {
+        const p = await this.request<Proposal | null>(`/assessments/${assessmentId}/proposal`);
+        if (p?.rendered_html?.trim()) return p;
+      } catch {
+        /* demo */
+      }
+      return demoGetProposal(assessmentId, this.getToken());
+    }
     return this.request<Proposal | null>(`/assessments/${assessmentId}/proposal`);
   }
 
@@ -224,6 +347,7 @@ class ApiClient {
   }
 
   chat(message: string, assessment_id?: string) {
+    if (isDemoMode()) return demoChat(message, assessment_id, this.getToken());
     return this.request<{ message: { content: string } }>('/chat', { method: 'POST', body: JSON.stringify({ message, assessment_id }) });
   }
 
@@ -268,12 +392,16 @@ export interface Assessment {
   industry_benchmark_snapshot: Record<string, unknown> | null;
   current_step?: number;
   completed_steps?: number[];
+  portal_token?: string | null;
+  approved_at?: string | null;
+  portal_url?: string;
   created_at: string;
   updated_at: string;
   client?: {
     company_name: string;
     industry_id: string;
     industry_name?: string;
+    country_of_operation?: string | null;
     contact_name?: string;
     contact_email?: string;
     contact_phone?: string;

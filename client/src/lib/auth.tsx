@@ -39,6 +39,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   useEffect(() => {
+    api.setOnUnauthorized(() => {
+      setUser(null);
+      if (!window.location.pathname.startsWith('/login')) {
+        window.location.href = '/login?session=expired';
+      }
+    });
+  }, []);
+
+  useEffect(() => {
     if (!user) return;
     let timer: ReturnType<typeof setTimeout>;
     const reset = () => {

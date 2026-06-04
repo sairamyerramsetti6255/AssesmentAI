@@ -1,17 +1,22 @@
-import { useParams, Link } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Layout } from '@/components/Layout';
 import { PageHeader } from '@/components/PageHeader';
 import { PageLoading } from '@/components/LoadingSkeleton';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { NextStepBanner } from '@/components/AssessmentJourney';
+import { AssessmentDeliverablesRoadmap } from '@/components/AssessmentDeliverablesRoadmap';
+import { useDemoHydrate } from '@/hooks/useDemoHydrate';
+import { PocLetterSection } from '@/components/PocLetterSection';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Card';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, Target, Lightbulb, FileText, Loader2 } from 'lucide-react';
 
 export default function GapAnalysisPage() {
   const { id } = useParams<{ id: string }>();
   const qc = useQueryClient();
+
+  useDemoHydrate(id);
 
   const { data: gap, isLoading } = useQuery({
     queryKey: ['gap-analysis', id],
@@ -24,6 +29,14 @@ export default function GapAnalysisPage() {
     queryFn: () => api.getPoc(id!),
     enabled: !!id,
   });
+
+  const { data: results } = useQuery({
+    queryKey: ['results', id],
+    queryFn: () => api.getResults(id!),
+    enabled: !!id,
+  });
+
+  const hasScore = !!results?.score;
 
   const generateMutation = useMutation({
     mutationFn: () => api.generateGapAnalysis(id!),
@@ -40,104 +53,122 @@ export default function GapAnalysisPage() {
   return (
     <Layout>
       <PageHeader
-        title="Gap Analysis & Recommendations"
-        subtitle="AI-identified gaps and Pbshope solution mapping"
+        title="Gap Analysis"
+        subtitle="Prioritized gaps and Pbshope solution mapping — then generate your PoC letter"
         actions={
-          <>
+          <div className="flex flex-wrap gap-2">
             <Button onClick={() => generateMutation.mutate()} disabled={generateMutation.isPending}>
-              <Sparkles className="mr-2 h-4 w-4" /> {gap ? 'Regenerate' : 'Generate'} Analysis
+              {generateMutation.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="mr-2 h-4 w-4" />
+              )}
+              {gap ? 'Regenerate' : 'Generate'} analysis
             </Button>
             {gap && (
-              <>
-                <Button variant="outline" onClick={() => pocMutation.mutate()} disabled={pocMutation.isPending}>
-                  {poc ? 'Regenerate' : 'Generate'} PoC Plan
-                </Button>
-                <Link to={`/assessments/${id}/proposal`}><Button variant="outline">Proposal</Button></Link>
-              </>
+              <Button variant="outline" onClick={() => pocMutation.mutate()} disabled={pocMutation.isPending}>
+                {pocMutation.isPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <FileText className="mr-2 h-4 w-4" />
+                )}
+                {poc ? 'Regenerate' : 'Generate'} PoC letter
+              </Button>
             )}
-          </>
+          </div>
         }
       />
 
-      {!gap ? (
-        <Card><CardContent className="py-8 text-center text-slate-500">Generate gap analysis to see recommendations.</CardContent></Card>
+      <AssessmentDeliverablesRoadmap assessmentId={id!} highlight="gap" compact className="mb-4" />
+
+      {!hasScore ? (
+        <div className="section-panel py-12 text-center">
+          <Target className="mx-auto mb-4 h-10 w-10 text-brand-slate" />
+          <p className="mx-auto max-w-lg text-brand-slate">
+            Gap analysis needs readiness scores. Complete the rep&apos;s <strong>live session</strong>, or on Step 5 use
+            <strong> Prepare demo deliverables</strong> for a manager-only preview.
+          </p>
+        </div>
+      ) : !gap ? (
+        <div className="section-panel py-16 text-center">
+          <Target className="mx-auto mb-4 h-10 w-10 text-brand-slate" />
+          <p className="text-brand-slate">Click <strong>Generate analysis</strong> above to unlock recommendations and the PoC letter.</p>
+        </div>
       ) : (
-        <>
-          <div className="mb-6 grid gap-6 lg:grid-cols-2">
-            <Card>
-              <CardHeader><CardTitle>Identified Gaps</CardTitle></CardHeader>
-              <CardContent className="space-y-3">
+        <div className="space-y-8">
+          <div className="grid gap-6 lg:grid-cols-2">
+            <section className="section-panel">
+              <h2 className="section-panel-title">
+                <Target className="h-4 w-4" /> Identified gaps
+              </h2>
+              <div className="space-y-3">
                 {gap.gaps.map((g, i) => (
-                  <div key={i} className="rounded-lg border p-3">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{g.driver}</span>
-                      <Badge className={g.severity === 'high' ? 'bg-red-100 text-red-700' : g.severity === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}>
+                  <div key={i} className="gap-item">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-brand-navy">{g.driver}</span>
+                      <Badge
+                        className={
+                          g.severity === 'high'
+                            ? 'bg-red-50 text-red-700 ring-1 ring-red-100'
+                            : g.severity === 'medium'
+                              ? 'bg-amber-50 text-amber-800 ring-1 ring-amber-100'
+                              : 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-100'
+                        }
+                      >
                         {g.severity}
                       </Badge>
                     </div>
-                    <p className="mt-1 text-sm text-slate-600">{g.gap}</p>
+                    <p className="mt-2 text-sm leading-relaxed text-brand-slate">{g.gap}</p>
                   </div>
                 ))}
-              </CardContent>
-            </Card>
+              </div>
+            </section>
 
-            <Card>
-              <CardHeader><CardTitle>Recommended Pbshope Solutions</CardTitle></CardHeader>
-              <CardContent className="space-y-3">
+            <section className="section-panel">
+              <h2 className="section-panel-title">
+                <Lightbulb className="h-4 w-4" /> Recommended solutions
+              </h2>
+              <div className="space-y-3">
                 {gap.recommended_solutions.map((s, i) => (
-                  <div key={i} className="rounded-lg border p-3">
-                    <div className="font-medium text-brand-primary">{s.solution_name}</div>
-                    <p className="mt-1 text-sm text-slate-600">{s.rationale}</p>
+                  <div key={i} className="gap-item border-l-4 border-l-brand-primary">
+                    <p className="font-semibold text-brand-primary">{s.solution_name}</p>
+                    <p className="mt-2 text-sm leading-relaxed text-brand-slate">{s.rationale}</p>
                   </div>
                 ))}
-              </CardContent>
-            </Card>
+              </div>
+            </section>
           </div>
 
           {(poc || pocMutation.isPending) && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Proof of Concept Preview</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {pocMutation.isPending ? (
-                  <p className="text-sm text-slate-500">Generating PoC plan...</p>
-                ) : poc?.html_content ? (
-                  <div
-                    className="prose prose-sm max-w-none rounded-lg border bg-white p-4"
-                    dangerouslySetInnerHTML={{ __html: poc.html_content }}
-                  />
-                ) : poc?.content ? (
-                  <div className="space-y-4">
-                    {Object.entries(poc.content).map(([key, value]) => (
-                      <div key={key} className="rounded-lg border p-4">
-                        <h4 className="mb-2 font-medium capitalize">{key.replace(/_/g, ' ')}</h4>
-                        {Array.isArray(value) ? (
-                          <ul className="list-inside list-disc space-y-1 text-sm text-slate-600">
-                            {value.map((item, i) => (
-                              <li key={i}>{typeof item === 'object' ? JSON.stringify(item) : String(item)}</li>
-                            ))}
-                          </ul>
-                        ) : typeof value === 'object' && value !== null ? (
-                          <dl className="grid gap-2 text-sm sm:grid-cols-2">
-                            {Object.entries(value as Record<string, unknown>).map(([k, v]) => (
-                              <div key={k}>
-                                <dt className="text-slate-500">{k.replace(/_/g, ' ')}</dt>
-                                <dd className="font-medium">{String(v)}</dd>
-                              </div>
-                            ))}
-                          </dl>
-                        ) : (
-                          <p className="text-sm text-slate-600">{String(value)}</p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
+            <section className="mt-4">
+              <div className="mb-8 text-center sm:text-left">
+                <h2 className="text-2xl font-bold tracking-tight text-brand-navy">Proof of concept letter</h2>
+                <p className="mx-auto mt-2 max-w-2xl text-sm leading-relaxed text-brand-slate sm:mx-0">
+                  Client-ready executive document — objectives, scope, timeline, and success metrics in a formal
+                  letter layout.
+                </p>
+              </div>
+              <PocLetterSection
+                assessmentId={id!}
+                poc={poc}
+                isGenerating={pocMutation.isPending}
+                onRegenerate={() => pocMutation.mutate()}
+              />
+            </section>
           )}
-        </>
+
+          <NextStepBanner
+            title={poc ? 'Next: client proposal' : 'Add a PoC letter, then build the proposal'}
+            description={
+              poc
+                ? 'Your gaps, solutions, and PoC letter roll into a polished proposal.'
+                : 'Generate the PoC letter above to strengthen the pitch.'
+            }
+            actionLabel="Go to proposal"
+            to={`/assessments/${id}/proposal`}
+            secondary={{ label: 'Back to results', to: `/assessments/${id}/results` }}
+          />
+        </div>
       )}
     </Layout>
   );

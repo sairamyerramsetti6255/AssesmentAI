@@ -15,6 +15,7 @@ export function formatDate(date: string) {
 
 export const STATUS_LABELS: Record<string, string> = {
   draft: 'Draft',
+  approved: 'Approved',
   client_info: 'Client Info',
   pre_assessment: 'Deep Research',
   assigned: 'Assigned',
@@ -25,6 +26,7 @@ export const STATUS_LABELS: Record<string, string> = {
 
 export const STATUS_COLORS: Record<string, string> = {
   draft: 'bg-brand-cream text-brand-navy',
+  approved: 'bg-emerald-50 text-emerald-800',
   client_info: 'bg-brand-soft-light text-brand-primary ring-1 ring-brand-cream',
   pre_assessment: 'bg-brand-soft-light text-brand-navy ring-1 ring-brand-cream',
   assigned: 'bg-brand-cream text-brand-primary',

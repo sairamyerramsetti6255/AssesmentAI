@@ -5,6 +5,8 @@
   --color-brand-primary: #4B5694;
   --color-brand-slate: #7288AE;
   --color-brand-cream: #EAE0CF;
+  --color-brand-soft: #EAE0CF;
+  --color-brand-soft-light: #f2ede4;
   --color-primary: #4B5694;
   --color-primary-foreground: #ffffff;
   --color-border: #EAE0CF;
@@ -15,26 +17,60 @@
   --radius: 0.75rem;
 }
 
+@utility bg-brand-soft-light {
+  background-color: var(--color-brand-soft-light);
+}
+
 body {
   @apply bg-white text-brand-navy antialiased;
   font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
+/* ——— App shell ——— */
+.app-main-bg {
+  background-color: #faf9f7;
+  background-image: radial-gradient(circle at 100% 0%, rgba(75, 86, 148, 0.04) 0%, transparent 42%),
+    radial-gradient(circle at 0% 100%, rgba(234, 224, 207, 0.35) 0%, transparent 40%);
+}
+
 .glass-card {
-  @apply rounded-2xl border border-brand-cream bg-white shadow-sm;
-  box-shadow: 0 1px 3px rgba(17, 24, 68, 0.06);
+  @apply rounded-2xl border border-brand-cream bg-white;
+  box-shadow: 0 1px 2px rgba(17, 24, 68, 0.04), 0 8px 24px rgba(17, 24, 68, 0.05);
+}
+
+.glass-card-hover {
+  @apply transition-all duration-200 hover:shadow-md;
+  box-shadow: 0 1px 2px rgba(17, 24, 68, 0.04), 0 8px 24px rgba(17, 24, 68, 0.05);
+}
+.glass-card-hover:hover {
+  box-shadow: 0 4px 12px rgba(17, 24, 68, 0.08), 0 16px 40px rgba(17, 24, 68, 0.07);
 }
 
 .page-hero {
   @apply relative overflow-hidden rounded-2xl p-6 sm:p-8 bg-brand-navy text-white;
+  box-shadow: 0 12px 40px rgba(17, 24, 68, 0.18);
+}
+
+.page-hero::after {
+  content: '';
+  position: absolute;
+  right: -20%;
+  top: -40%;
+  width: 55%;
+  height: 140%;
+  background: rgba(114, 136, 174, 0.12);
+  border-radius: 50%;
+  pointer-events: none;
 }
 
 .wizard-hero {
   @apply relative overflow-hidden rounded-2xl px-6 py-8 sm:px-8 bg-brand-navy text-white;
+  box-shadow: 0 8px 28px rgba(17, 24, 68, 0.14);
 }
 
 .wizard-card {
-  @apply rounded-2xl border border-brand-cream bg-white shadow-sm;
+  @apply rounded-2xl border border-brand-cream bg-white;
+  box-shadow: 0 1px 3px rgba(17, 24, 68, 0.06);
 }
 
 .nav-item-active {
@@ -55,10 +91,310 @@ body {
   color: #111844;
 }
 
-.bg-brand-soft {
-  background-color: #EAE0CF;
+/* ——— Dashboard stat accent ——— */
+.stat-card-accent {
+  @apply relative overflow-hidden rounded-2xl border border-brand-cream bg-white p-6;
+  box-shadow: 0 1px 2px rgba(17, 24, 68, 0.04), 0 10px 28px rgba(17, 24, 68, 0.06);
+}
+.stat-card-accent::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: #4B5694;
+  border-radius: 4px 0 0 4px;
 }
 
-.bg-brand-soft-light {
-  background-color: rgba(234, 224, 207, 0.35);
+/* ——— Professional letter / PoC document ——— */
+.document-shell {
+  @apply overflow-hidden rounded-2xl border border-brand-cream;
+  background-color: var(--color-brand-soft-light);
+}
+
+.document-toolbar {
+  @apply flex flex-wrap items-center justify-between gap-3 border-b border-brand-cream bg-white px-5 py-4;
+}
+
+.document-paper {
+  @apply mx-auto max-w-[820px] bg-white px-6 py-10 sm:px-12 sm:py-14;
+  box-shadow: inset 0 0 0 1px rgba(234, 224, 207, 0.5);
+}
+
+.professional-letter {
+  color: #111844;
+  font-size: 15px;
+  line-height: 1.65;
+  font-family: Georgia, 'Times New Roman', serif;
+}
+
+.professional-letter .letter-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-bottom: 1.75rem;
+}
+
+.professional-letter .letter-brand-mark {
+  display: block;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #4B5694;
+}
+
+.professional-letter .letter-brand-sub {
+  display: block;
+  margin-top: 0.25rem;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #7288AE;
+}
+
+.professional-letter .letter-meta-block {
+  text-align: right;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 0.8rem;
+}
+
+.professional-letter .letter-meta {
+  margin: 0.2rem 0;
+  color: #111844;
+}
+
+.professional-letter .letter-meta-label {
+  display: inline-block;
+  min-width: 6.5rem;
+  font-weight: 600;
+  color: #7288AE;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+}
+
+.professional-letter .letter-rule {
+  height: 2px;
+  background: #EAE0CF;
+  margin: 0 0 1.75rem;
+}
+
+.professional-letter .letter-re {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #4B5694;
+  margin: 0 0 1.25rem;
+}
+
+.professional-letter .letter-salutation {
+  margin: 0 0 1rem;
+  font-weight: 600;
+}
+
+.professional-letter .letter-lead {
+  margin: 0 0 1.75rem;
+  color: #2d3558;
+}
+
+.professional-letter .letter-section {
+  margin-bottom: 1.75rem;
+}
+
+.professional-letter .letter-h2 {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #4B5694;
+  margin: 0 0 0.75rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid #EAE0CF;
+}
+
+.professional-letter .letter-body {
+  margin: 0;
+  text-align: justify;
+}
+
+.professional-letter .letter-body-strong {
+  margin: 0.25rem 0 0;
+  font-weight: 600;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+.professional-letter .letter-list {
+  margin: 0;
+  padding-left: 1.35rem;
+}
+
+.professional-letter .letter-list li {
+  margin-bottom: 0.45rem;
+}
+
+.professional-letter .letter-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 0.88rem;
+}
+
+.professional-letter .letter-table th,
+.professional-letter .letter-table td {
+  border: 1px solid #EAE0CF;
+  padding: 0.65rem 0.85rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.professional-letter .letter-table th {
+  background: rgba(234, 224, 207, 0.35);
+  font-weight: 600;
+  color: #4B5694;
+}
+
+.professional-letter .letter-td-phase {
+  font-weight: 600;
+  white-space: nowrap;
+  color: #111844;
+}
+
+.professional-letter .letter-callout {
+  background: rgba(234, 224, 207, 0.25);
+  border: 1px solid #EAE0CF;
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+}
+
+.professional-letter .letter-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+}
+
+@media (max-width: 540px) {
+  .professional-letter .letter-grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.professional-letter .letter-closing {
+  margin: 2rem 0 1.5rem;
+  text-align: justify;
+}
+
+.professional-letter .letter-signature {
+  margin-top: 2.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid #EAE0CF;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+.professional-letter .letter-sign-off {
+  margin: 0 0 0.5rem;
+}
+
+.professional-letter .letter-sign-name {
+  margin: 0;
+  font-weight: 700;
+  color: #4B5694;
+}
+
+.professional-letter .letter-sign-role {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+  color: #7288AE;
+}
+
+/* Proposal body inside letter wrapper */
+.proposal-letter-body h1 {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 1.5rem;
+  color: #111844;
+  margin: 0 0 1rem;
+}
+
+.proposal-letter-body h2 {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #4B5694;
+  margin: 1.5rem 0 0.65rem;
+}
+
+.proposal-letter-body p,
+.proposal-letter-body li {
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.proposal-letter-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  font-size: 0.9rem;
+}
+
+.proposal-letter-body th,
+.proposal-letter-body td {
+  border: 1px solid #EAE0CF;
+  padding: 0.5rem 0.75rem;
+}
+
+.proposal-letter-body ul {
+  padding-left: 1.25rem;
+}
+
+/* Section panels (gap analysis, etc.) */
+.section-panel {
+  @apply rounded-2xl border border-brand-cream bg-white p-6 sm:p-8;
+  box-shadow: 0 1px 3px rgba(17, 24, 68, 0.05);
+}
+
+.section-panel-title {
+  @apply mb-5 flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-brand-primary;
+}
+
+.gap-item {
+  @apply rounded-xl border border-brand-cream p-4 transition-colors;
+  background-color: color-mix(in srgb, var(--color-brand-cream) 45%, white);
+}
+.gap-item:hover {
+  background-color: var(--color-brand-soft-light);
+}
+
+/* PoC letter page — print */
+@media print {
+  .poc-letter-page > div:first-child {
+    display: none !important;
+  }
+  .poc-letter-page {
+    box-shadow: none !important;
+    border: none !important;
+  }
+}
+
+@media print {
+  .document-toolbar,
+  header,
+  aside,
+  .no-print {
+    display: none !important;
+  }
+  .document-paper {
+    box-shadow: none;
+    max-width: 100%;
+    padding: 0;
+  }
+  body {
+    background: white;
+  }
 }

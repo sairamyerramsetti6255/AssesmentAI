@@ -9,10 +9,13 @@ import { Chatbot } from '@/components/Chatbot';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Card';
 import { STATUS_COLORS, STATUS_LABELS, formatDate } from '@/lib/utils';
-import { Plus, Building2, ArrowRight } from 'lucide-react';
+import { Plus, Building2, ArrowRight, Mic, LayoutGrid, List } from 'lucide-react';
+import { useState } from 'react';
+import { AssessmentPipeline } from '@/components/AssessmentPipeline';
 
 export default function AssessmentsPage() {
   const { user } = useAuth();
+  const [view, setView] = useState<'list' | 'pipeline'>('pipeline');
   const { data: assessments = [], isLoading, isError, error } = useQuery({
     queryKey: ['assessments'],
     queryFn: () => api.getAssessments(),
@@ -44,10 +47,25 @@ export default function AssessmentsPage() {
           <p className="text-brand-slate">No assessments yet — create your first one.</p>
         </div>
       ) : (
+        <>
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-brand-slate">Track every client from draft through live session to proposal.</p>
+          <div className="flex gap-2 rounded-xl bg-white p-1 ring-1 ring-brand-cream">
+            <Button variant={view === 'pipeline' ? 'default' : 'ghost'} size="sm" onClick={() => setView('pipeline')}>
+              <LayoutGrid className="mr-1 h-4 w-4" /> Pipeline
+            </Button>
+            <Button variant={view === 'list' ? 'default' : 'ghost'} size="sm" onClick={() => setView('list')}>
+              <List className="mr-1 h-4 w-4" /> List
+            </Button>
+          </div>
+        </div>
+        {view === 'pipeline' ? (
+          <AssessmentPipeline assessments={assessments} />
+        ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {assessments.map((a) => (
             <Link key={a.id} to={`/assessments/${a.id}`} className="group">
-              <article className="glass-card flex h-full flex-col p-5 transition-all hover:shadow-md">
+              <article className="glass-card glass-card-hover flex h-full flex-col p-6">
                 <div className="mb-4 flex items-start justify-between gap-3">
                   <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-soft-light ring-1 ring-brand-cream">
                     <Building2 className="h-5 w-5 text-brand-primary" />
@@ -62,14 +80,24 @@ export default function AssessmentsPage() {
                 <p className="mt-1 text-sm text-brand-slate">
                   {a.client?.industry_name || 'No industry'} · {formatDate(a.created_at)}
                 </p>
-                {a.assigned_rep && <p className="mt-2 text-xs text-brand-slate">Rep: {a.assigned_rep.full_name}</p>}
+                {a.assigned_rep && user?.role_name !== 'sales_rep' && (
+                  <p className="mt-2 text-xs text-brand-slate">Rep: {a.assigned_rep.full_name}</p>
+                )}
+                {user?.role_name === 'sales_rep' && a.status === 'assigned' && (
+                  <p className="mt-2 flex items-center gap-1 text-xs font-semibold text-brand-primary">
+                    <Mic className="h-3.5 w-3.5" /> Ready for live session
+                  </p>
+                )}
                 <div className="mt-auto flex items-center gap-1 pt-4 text-xs font-semibold text-brand-primary opacity-0 transition-opacity group-hover:opacity-100">
-                  Open wizard <ArrowRight className="h-3.5 w-3.5" />
+                  {user?.role_name === 'sales_rep' ? 'Open briefing' : 'Open wizard'}
+                  <ArrowRight className="h-3.5 w-3.5" />
                 </div>
               </article>
             </Link>
           ))}
         </div>
+        )}
+        </>
       )}
       <Chatbot />
     </Layout>

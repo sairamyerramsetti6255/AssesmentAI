@@ -6,10 +6,12 @@ import { Layout } from '@/components/Layout';
 import { PageHeader } from '@/components/PageHeader';
 import { PageLoading } from '@/components/LoadingSkeleton';
 import { Chatbot } from '@/components/Chatbot';
+import { AssessmentJourney } from '@/components/AssessmentJourney';
+import { VoiceRecorder } from '@/components/VoiceRecorder';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Textarea } from '@/components/ui/Input';
-import { Mic, MicOff, SkipForward, Edit, Trash2, CheckCircle, X, Building2, Target, Loader2, Sparkles } from 'lucide-react';
+import { SkipForward, Edit, Trash2, CheckCircle, X, Building2, Loader2, Sparkles } from 'lucide-react';
 
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -49,6 +51,7 @@ export default function LiveSessionPage() {
 
   const activeQuestions = session?.questions.filter((q) => q.session_status === 'active') || [];
   const currentQuestion = activeQuestions[currentIndex];
+  const qType = currentQuestion?.question_type;
 
   useEffect(() => {
     if (!currentQuestion) return;
@@ -74,16 +77,20 @@ export default function LiveSessionPage() {
     }
   }, [currentQuestion?.id, session]);
 
+  const buildAnswerPayload = () => ({
+    question_id: currentQuestion!.id,
+    rating_value: qType === 'rating' ? rating : undefined,
+    text_answer:
+      qType === 'multi_select'
+        ? multiSelectAnswer
+        : qType === 'text'
+          ? textAnswer
+          : textAnswer || undefined,
+    transcript_answer: qType === 'voice' ? transcript : undefined,
+  });
+
   const saveAnswerMutation = useMutation({
-    mutationFn: () => {
-      const qType = currentQuestion!.question_type;
-      return api.saveAnswer(sessionId!, {
-        question_id: currentQuestion!.id,
-        rating_value: qType === 'rating' ? rating : undefined,
-        text_answer: qType === 'multi_select' ? multiSelectAnswer : qType === 'text' ? textAnswer : textAnswer || undefined,
-        transcript_answer: qType === 'voice' ? transcript : transcript || undefined,
-      });
-    },
+    mutationFn: () => api.saveAnswer(sessionId!, buildAnswerPayload()),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['session', sessionId] }),
   });
 
@@ -99,13 +106,7 @@ export default function LiveSessionPage() {
 
   const completeMutation = useMutation({
     mutationFn: async () => {
-      const qType = currentQuestion!.question_type;
-      await api.saveAnswer(sessionId!, {
-        question_id: currentQuestion!.id,
-        rating_value: qType === 'rating' ? rating : undefined,
-        text_answer: qType === 'multi_select' ? multiSelectAnswer : qType === 'text' ? textAnswer : textAnswer || undefined,
-        transcript_answer: qType === 'voice' ? transcript : transcript || undefined,
-      });
+      await api.saveAnswer(sessionId!, buildAnswerPayload());
       await api.completeSession(sessionId!);
       await api.scoreAssessment(session!.assessment_id);
     },
@@ -132,7 +133,9 @@ export default function LiveSessionPage() {
           });
           setTranscript(res.transcript);
         } catch (err) {
-          setTranscript(`Recording captured (${duration}s). ${err instanceof Error ? err.message : 'Transcription unavailable — edit manually.'}`);
+          setTranscript(
+            `Recording captured (${duration}s). ${err instanceof Error ? err.message : 'Transcription unavailable — edit manually.'}`,
+          );
         } finally {
           setTranscribing(false);
         }
@@ -143,7 +146,7 @@ export default function LiveSessionPage() {
       recorder.start();
       setRecording(true);
     } catch {
-      setTranscript('Microphone access denied. Type the client response manually below.');
+      setTranscript('Microphone access denied. Type the client response in the box below.');
     }
   };
 
@@ -153,8 +156,28 @@ export default function LiveSessionPage() {
   };
 
   const nextQuestion = async () => {
+    if (qType === 'voice' && !transcript.trim()) {
+      window.alert('Record or type the client response before continuing.');
+      return;
+    }
+    if (qType === 'multi_select' && !multiSelectAnswer) {
+      window.alert('Select an option before continuing.');
+      return;
+    }
+    if (qType === 'text' && !textAnswer.trim()) {
+      window.alert('Enter the client text response before continuing.');
+      return;
+    }
     await saveAnswerMutation.mutateAsync();
     if (currentIndex < activeQuestions.length - 1) setCurrentIndex((i) => i + 1);
+  };
+
+  const finishSession = () => {
+    if (qType === 'voice' && !transcript.trim()) {
+      window.alert('Record or type the client response before completing.');
+      return;
+    }
+    completeMutation.mutate();
   };
 
   if (isLoading || !session) return <Layout><PageLoading /></Layout>;
@@ -178,8 +201,10 @@ export default function LiveSessionPage() {
     <Layout>
       <PageHeader
         title="Live Assessment Session"
-        subtitle={`${assessment?.company_name || 'Client'} · Question ${currentIndex + 1} of ${activeQuestions.length}`}
+        subtitle={`${assessment?.company_name || 'Client'} · Record the client's answer · ${currentIndex + 1} / ${activeQuestions.length}`}
       />
+
+      <AssessmentJourney assessmentId={session.assessment_id} current="session" allowed={['prepare', 'session']} />
 
       <div className="mb-6 grid gap-4 lg:grid-cols-3">
         <div className="glass-card p-4 lg:col-span-2">
@@ -190,17 +215,14 @@ export default function LiveSessionPage() {
               <p className="text-xs text-brand-slate">
                 {assessment?.industry_name || 'Industry'} · {assessment?.business_domains?.join(', ') || 'General'}
               </p>
-              {assessment?.pain_points?.length ? (
-                <p className="mt-1 text-xs text-brand-slate">Focus: {assessment.pain_points.join(', ')}</p>
-              ) : null}
             </div>
           </div>
         </div>
         <div className="glass-card p-4">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-brand-slate">
-            <Sparkles className="h-4 w-4 text-brand-primary" /> AI Scoring
+            <Sparkles className="h-4 w-4 text-brand-primary" /> Client discovery
           </div>
-          <p className="mt-1 text-xs text-brand-navy">Answers scored vs manager benchmarks after session</p>
+          <p className="mt-1 text-xs text-brand-navy">Benchmarks are hidden during the call</p>
         </div>
       </div>
 
@@ -214,95 +236,99 @@ export default function LiveSessionPage() {
         </div>
       </div>
 
-      {currentQuestion.expected_answer && (
-        <div className="mb-4 rounded-xl border border-brand-cream bg-brand-soft-light p-4 ring-1 ring-brand-cream">
-          <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-brand-primary">
-            <Target className="h-4 w-4" /> Manager Benchmark (expected answer)
-          </div>
-          <p className="text-sm leading-relaxed text-brand-navy">{currentQuestion.expected_answer}</p>
-        </div>
-      )}
-
       <Card className="mb-6">
         <CardHeader>
           <CardTitle>{currentQuestion.question_text}</CardTitle>
-          {currentQuestion.is_ai_generated && <span className="text-xs text-brand-primary">AI Generated Question</span>}
+          <span className="text-xs font-semibold uppercase tracking-wider text-brand-primary">
+            {currentQuestion.question_type.replace('_', ' ')}
+          </span>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="text-xs uppercase tracking-wide text-brand-slate">
-            Answer type: {currentQuestion.question_type.replace('_', ' ')}
-          </div>
-
-          {(currentQuestion.question_type === 'voice' || currentQuestion.question_type === 'rating') && (
-            <div>
-              <h3 className="mb-2 text-sm font-medium">Voice Recording</h3>
-              <div className="flex items-center gap-3">
-                <Button variant={recording ? 'destructive' : 'default'} onClick={recording ? stopRecording : startRecording} disabled={transcribing}>
-                  {recording ? <><MicOff className="mr-2 h-4 w-4" /> Stop</> : <><Mic className="mr-2 h-4 w-4" /> Record</>}
-                </Button>
-                {recording && <span className="animate-pulse text-red-600">Recording...</span>}
-                {transcribing && (
-                  <span className="flex items-center gap-1 text-sm text-brand-primary">
-                    <Loader2 className="h-4 w-4 animate-spin" /> Transcribing with AI...
-                  </span>
-                )}
-              </div>
-              {(transcript || currentQuestion.question_type === 'voice') && (
-                <Textarea className="mt-3" value={transcript} onChange={(e) => setTranscript(e.target.value)} rows={4} placeholder="Client transcript (auto-filled after recording, editable)" />
-              )}
-            </div>
+          {qType === 'voice' && (
+            <VoiceRecorder
+              transcript={transcript}
+              onTranscriptChange={setTranscript}
+              recording={recording}
+              transcribing={transcribing}
+              onStart={startRecording}
+              onStop={stopRecording}
+            />
           )}
 
-          {currentQuestion.question_type === 'rating' && (
+          {qType === 'rating' && (
             <div>
-              <h3 className="mb-2 text-sm font-medium">Rating ({currentQuestion.rating_min}-{currentQuestion.rating_max})</h3>
-              <div className="flex gap-2">
-                {Array.from({ length: currentQuestion.rating_max - currentQuestion.rating_min + 1 }, (_, i) => i + currentQuestion.rating_min).map((v) => (
+              <h3 className="mb-3 text-sm font-medium text-brand-navy">
+                Client maturity rating ({currentQuestion.rating_min}–{currentQuestion.rating_max})
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                {Array.from(
+                  { length: currentQuestion.rating_max - currentQuestion.rating_min + 1 },
+                  (_, i) => i + currentQuestion.rating_min,
+                ).map((v) => (
                   <button
                     key={v}
                     type="button"
                     onClick={() => setRating(v)}
-                    className={`h-10 w-10 rounded-full font-medium ${rating === v ? 'bg-brand-primary text-white' : 'bg-brand-cream text-brand-navy'}`}
+                    className={`h-12 w-12 rounded-full text-base font-semibold transition-colors ${
+                      rating === v ? 'bg-brand-primary text-white shadow-md' : 'bg-brand-cream text-brand-navy hover:ring-2 hover:ring-brand-primary/30'
+                    }`}
                   >
                     {v}
                   </button>
                 ))}
               </div>
+              <div className="mt-4">
+                <h3 className="mb-2 text-sm font-medium text-brand-slate">Notes (optional)</h3>
+                <Textarea
+                  value={textAnswer}
+                  onChange={(e) => setTextAnswer(e.target.value)}
+                  rows={2}
+                  placeholder="Any context the client mentioned..."
+                />
+              </div>
             </div>
           )}
 
-          {currentQuestion.question_type === 'text' && (
+          {qType === 'text' && (
             <div>
-              <h3 className="mb-2 text-sm font-medium">Text Answer</h3>
-              <Textarea value={textAnswer} onChange={(e) => setTextAnswer(e.target.value)} rows={4} placeholder="Enter client response..." />
+              <h3 className="mb-2 text-sm font-medium text-brand-navy">Client written response</h3>
+              <Textarea
+                value={textAnswer}
+                onChange={(e) => setTextAnswer(e.target.value)}
+                rows={5}
+                placeholder="Type what the client said..."
+              />
             </div>
           )}
 
-          {currentQuestion.question_type === 'multi_select' && currentQuestion.options && (
+          {qType === 'multi_select' && currentQuestion.options && (
             <div>
-              <h3 className="mb-2 text-sm font-medium">Select an Option</h3>
+              <h3 className="mb-3 text-sm font-medium text-brand-navy">Select the option the client chose</h3>
               <div className="space-y-2">
                 {currentQuestion.options.map((opt) => (
-                  <label key={opt} className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 ${multiSelectAnswer === opt ? 'border-brand-primary bg-brand-soft-light' : ''}`}>
-                    <input type="radio" name="multi" checked={multiSelectAnswer === opt} onChange={() => setMultiSelectAnswer(opt)} />
-                    {opt}
+                  <label
+                    key={opt}
+                    className={`flex cursor-pointer items-center gap-3 rounded-xl border p-4 transition-colors ${
+                      multiSelectAnswer === opt ? 'border-brand-primary bg-brand-soft-light ring-2 ring-brand-primary/20' : 'border-brand-cream hover:bg-brand-soft-light'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="multi"
+                      checked={multiSelectAnswer === opt}
+                      onChange={() => setMultiSelectAnswer(opt)}
+                      className="h-4 w-4 accent-brand-primary"
+                    />
+                    <span className="text-sm font-medium text-brand-navy">{opt}</span>
                   </label>
                 ))}
               </div>
             </div>
           )}
 
-          {currentQuestion.question_type === 'rating' && (
-            <div>
-              <h3 className="mb-2 text-sm font-medium">Additional Notes (optional)</h3>
-              <Textarea value={textAnswer} onChange={(e) => setTextAnswer(e.target.value)} rows={2} />
-            </div>
-          )}
-
           <div className="flex flex-wrap gap-2 border-t border-brand-cream pt-4">
-            <span className="w-full text-sm font-medium text-brand-slate">Question Management</span>
             <Button variant="outline" size="sm" onClick={() => { setModifyText(currentQuestion.question_text); setModifyOpen(true); }}>
-              <Edit className="mr-1 h-3 w-3" /> Modify
+              <Edit className="mr-1 h-3 w-3" /> Modify question
             </Button>
             <Button variant="outline" size="sm" onClick={() => patchQuestionMutation.mutate({ action: 'skip', skip_reason: 'Skipped during session' })}>
               <SkipForward className="mr-1 h-3 w-3" /> Skip
@@ -317,15 +343,23 @@ export default function LiveSessionPage() {
       </Card>
 
       <div className="flex justify-between">
-        <Button variant="outline" disabled={currentIndex === 0} onClick={() => setCurrentIndex((i) => i - 1)}>Previous</Button>
+        <Button variant="outline" disabled={currentIndex === 0} onClick={() => setCurrentIndex((i) => i - 1)}>
+          Previous
+        </Button>
         {currentIndex < activeQuestions.length - 1 ? (
-          <Button onClick={nextQuestion} disabled={saveAnswerMutation.isPending}>Save & Next</Button>
+          <Button onClick={nextQuestion} disabled={saveAnswerMutation.isPending}>
+            Save & Next
+          </Button>
         ) : (
-          <Button onClick={() => completeMutation.mutate()} disabled={completeMutation.isPending}>
+          <Button onClick={finishSession} disabled={completeMutation.isPending}>
             {completeMutation.isPending ? (
-              <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> AI Analysis...</>
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> AI Analysis...
+              </>
             ) : (
-              <><CheckCircle className="mr-2 h-4 w-4" /> Complete & Score</>
+              <>
+                <CheckCircle className="mr-2 h-4 w-4" /> Complete & Score
+              </>
             )}
           </Button>
         )}
@@ -343,7 +377,10 @@ export default function LiveSessionPage() {
             <Textarea value={modifyText} onChange={(e) => setModifyText(e.target.value)} rows={4} />
             <div className="mt-4 flex justify-end gap-2">
               <Button variant="outline" onClick={() => setModifyOpen(false)}>Cancel</Button>
-              <Button onClick={() => patchQuestionMutation.mutate({ action: 'modify', question_text: modifyText })} disabled={!modifyText.trim()}>
+              <Button
+                onClick={() => patchQuestionMutation.mutate({ action: 'modify', question_text: modifyText })}
+                disabled={!modifyText.trim()}
+              >
                 Save Changes
               </Button>
             </div>

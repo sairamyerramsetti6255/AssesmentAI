@@ -1,10 +1,14 @@
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { Layout } from '@/components/Layout';
 import { PageHeader } from '@/components/PageHeader';
 import { PageLoading } from '@/components/LoadingSkeleton';
 import { Chatbot } from '@/components/Chatbot';
+import { NextStepBanner } from '@/components/AssessmentJourney';
+import { AssessmentDeliverablesRoadmap } from '@/components/AssessmentDeliverablesRoadmap';
+import { useDemoHydrate } from '@/hooks/useDemoHydrate';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Card';
@@ -71,6 +75,10 @@ function BenchmarkCard({ benchmark }: { benchmark: Record<string, unknown> }) {
 
 export default function ResultsPage() {
   const { id } = useParams<{ id: string }>();
+  const { user } = useAuth();
+  const isManager = user?.role_name === 'sales_manager' || user?.role_name === 'super_admin';
+
+  useDemoHydrate(id);
 
   const { data: results, isLoading } = useQuery({
     queryKey: ['results', id],
@@ -94,15 +102,19 @@ export default function ResultsPage() {
         title="Assessment Results"
         subtitle="AI-powered session analysis and readiness scores"
         actions={
-          <>
-            <Link to={`/assessments/${id}/gap-analysis`}><Button>Gap Analysis</Button></Link>
-            <Link to={`/assessments/${id}`}><Button variant="outline">Back to Assessment</Button></Link>
-          </>
+          <Link to={`/assessments/${id}`}><Button variant="outline">Back to Assessment</Button></Link>
         }
       />
 
+      <AssessmentDeliverablesRoadmap assessmentId={id!} highlight="results" compact className="mb-4" />
+
       {!score ? (
-        <Card><CardContent className="py-8 text-center">No scores available yet. Complete a live session first.</CardContent></Card>
+        <Card>
+          <CardContent className="py-8 text-center text-brand-slate">
+            No scores yet. Assign a rep for the live session, or use <strong>Prepare demo deliverables</strong> on Step 5
+            for a manager preview.
+          </CardContent>
+        </Card>
       ) : (
         <div className="space-y-6">
           {score.executive_summary && (
@@ -248,6 +260,22 @@ export default function ResultsPage() {
               </Card>
             )}
           </div>
+
+          {isManager ? (
+            <NextStepBanner
+              title="Next: build the gap analysis"
+              description="Turn these scores into prioritized gaps and matched Pbshope solutions, then generate the client proposal."
+              actionLabel="Go to Gap Analysis"
+              to={`/assessments/${id}/gap-analysis`}
+              secondary={{ label: 'Back to assessments', to: '/assessments' }}
+            />
+          ) : (
+            <NextStepBanner
+              title="Session complete — nicely done"
+              description="Your manager will take it from here with gap analysis and the client proposal."
+              secondary={{ label: 'Back to assessments', to: '/assessments' }}
+            />
+          )}
         </div>
       )}
 

@@ -1,5 +1,6 @@
 /** Origins always allowed in production (extend via CLIENT_URL / CORS_ORIGINS) */
 const BUILTIN_ORIGINS = [
+  'https://assessment.pbshope.in',
   'https://assessment.graylogic.cloud',
   'http://localhost:5173',
   'http://localhost:3000',
@@ -24,7 +25,13 @@ export function isOriginAllowed(origin: string | undefined, allowedList: string[
   try {
     const { hostname } = new URL(normalized);
     if (hostname === 'localhost' || hostname === '127.0.0.1') return true;
-    if (hostname.endsWith('.pbshope.in') || hostname.endsWith('.graylogic.cloud')) return true;
+    if (
+      hostname === 'pbshope.in' ||
+      hostname.endsWith('.pbshope.in') ||
+      hostname.endsWith('.graylogic.cloud')
+    ) {
+      return true;
+    }
   } catch {
     return false;
   }

@@ -78,6 +78,6 @@ export const ASSESSMENT_WIZARD_STEPS: WizardStep[] = [
   { id: 1, label: 'Client Info', subtitle: 'Company profile', icon: Building2 },
   { id: 2, label: 'Deep Research', subtitle: 'AI analysis', icon: Search },
   { id: 3, label: 'Documents', subtitle: 'Optional files', icon: FileUp },
-  { id: 4, label: 'Questions', subtitle: 'Set answers', icon: MessageSquareText },
+  { id: 4, label: 'Questions', subtitle: 'Benchmarks', icon: MessageSquareText },
   { id: 5, label: 'Review', subtitle: 'Assign rep', icon: UserCheck },
 ];

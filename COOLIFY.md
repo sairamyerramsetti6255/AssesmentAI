@@ -33,7 +33,7 @@ Open `https://YOUR-API-DOMAIN/` in the browser (not graylogic unless you point D
 ```
 PORT=3001
 GEMINI_API_KEY=your-key
-CLIENT_URL=https://assessment.graylogic.cloud
+CLIENT_URL=https://assessment.pbshope.in
 ```
 
 **Frontend app** — Base Directory: `client`
@@ -50,7 +50,44 @@ Check API: `https://YOUR-API/api/health` → should list `cors_origins`.
 
 ## If login still fails
 
+### 1. API must NOT show “Welcome to nginx!”
+
+Open `https://YOUR-API-DOMAIN/api/health` in a browser.
+
+| What you see | Meaning |
+|--------------|---------|
+| JSON `{ "status": "ok", ... }` | API is running — check CORS / frontend `VITE_API_URL` |
+| **Welcome to nginx!** | Wrong Coolify app — Node API is **not** deployed on this domain |
+| 404 / 502 | App crashed, wrong port, or wrong base directory |
+
+**Fix nginx-only domain:** In Coolify, use **Application** (Dockerfile), not a static/nginx template.
+
+| Setting | API app |
+|---------|---------|
+| Base Directory | `server` |
+| Dockerfile | `server/Dockerfile` (or `Dockerfile` in server folder) |
+| Port | `3001` |
+| Health check path | `/api/health` |
+
+Redeploy, then `/api/health` must return JSON before login will work.
+
+### 2. Frontend build
+
+`VITE_API_URL=https://YOUR-API-DOMAIN/api` (no trailing slash issues — app normalizes).
+
+Rebuild frontend after changing it.
+
+### 3. Env on API (not Gemini key in CLIENT_URL)
+
+```
+CLIENT_URL=https://assessment.pbshope.in
+PORT=3001
+```
+
+### 4. Other checks
+
 1. Hard refresh (Ctrl+Shift+R).
-2. DevTools → Network → `login` → if **CORS**, redeploy API with latest `main`.
-3. If **404/502**, API is down or wrong URL in frontend build.
-4. Temporarily set `CORS_ALLOW_ALL=true` on API (debug only), redeploy, test login.
+2. DevTools → Network → `login` → if **CORS**, fix `CLIENT_URL` and redeploy API.
+3. Temporarily `CORS_ALLOW_ALL=true` on API (debug only).
+
+Demo login: `manager@pbshope.com` / `manager123`

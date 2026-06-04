@@ -1,12 +1,15 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
-import { api, QUESTION_TYPES, Question } from '@/lib/api';
+import { api, QUESTION_TYPES, Question, type Assessment } from '@/lib/api';
 import { Layout } from '@/components/Layout';
 import { PageLoading } from '@/components/LoadingSkeleton';
 import { Chatbot } from '@/components/Chatbot';
 import { AssessmentStepper, ASSESSMENT_WIZARD_STEPS } from '@/components/AssessmentStepper';
+import { NextStepBanner } from '@/components/AssessmentJourney';
+import { AssessmentWorkflowHelp } from '@/components/AssessmentWorkflowHelp';
+import { AssessmentDeliverablesRoadmap } from '@/components/AssessmentDeliverablesRoadmap';
 import { MultiTagInput, BUSINESS_DOMAIN_SUGGESTIONS } from '@/components/MultiTagInput';
 import { DocumentUploadZone } from '@/components/DocumentUploadZone';
 import { QuestionAnswerCard } from '@/components/QuestionAnswerCard';
@@ -15,9 +18,10 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Card';
 import { Input, Label, Select } from '@/components/ui/Input';
 import { STATUS_COLORS, STATUS_LABELS } from '@/lib/utils';
+import { cleanBenchmarkDrafts, isGenericBenchmark } from '@/lib/benchmarkUtils';
 import {
-  Sparkles, UserPlus, Play, BarChart3, FileText,
-  Plus, Trash2, Save, ChevronLeft, ChevronRight, CheckCircle2, Loader2, RefreshCw, AlertCircle,
+  Sparkles, UserPlus, BarChart3,
+  Plus, Trash2, Save, ChevronLeft, ChevronRight, CheckCircle2, Loader2, AlertCircle,
 } from 'lucide-react';
 
 export default function AssessmentDetailPage() {
@@ -28,18 +32,17 @@ export default function AssessmentDetailPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [repId, setRepId] = useState('');
   const [saveMessage, setSaveMessage] = useState('');
-  const [generatingResearch, setGeneratingResearch] = useState(false);
-  const [generatingQuestions, setGeneratingQuestions] = useState(false);
+  const [generatingAll, setGeneratingAll] = useState(false);
   const [questionGenError, setQuestionGenError] = useState('');
   const [researchError, setResearchError] = useState('');
   const [stepError, setStepError] = useState('');
-  const researchAttemptedRef = useRef<string | null>(null);
-  const questionsAttemptedRef = useRef<string | null>(null);
 
   const [clientForm, setClientForm] = useState({
     company_name: '', business_domains: [] as string[], website_url: '', website_details: '',
-    contact_name: '', contact_email: '', contact_phone: '', industry_id: '',
+    contact_name: '', contact_email: '', contact_phone: '', industry_id: '', country_of_operation: '',
   });
+  const [generatingBenchmarks, setGeneratingBenchmarks] = useState(false);
+  const [portalUrl, setPortalUrl] = useState<string | null>(null);
   const [researchForm, setResearchForm] = useState({ research_notes: '', pain_point_ids: [] as string[] });
   const [answerDrafts, setAnswerDrafts] = useState<Record<string, string>>({});
   const [aiGeneratingId, setAiGeneratingId] = useState<string | null>(null);
@@ -77,6 +80,7 @@ export default function AssessmentDetailPage() {
         contact_email: assessment.client?.contact_email || '',
         contact_phone: assessment.client?.contact_phone || '',
         industry_id: assessment.client?.industry_id || '',
+        country_of_operation: assessment.client?.country_of_operation || '',
       });
       setResearchForm({
         research_notes: assessment.pre_assessment_notes || '',
@@ -104,8 +108,11 @@ export default function AssessmentDetailPage() {
 
   useEffect(() => {
     const drafts: Record<string, string> = {};
-    questions.forEach((q) => { drafts[q.id] = q.expected_answer ?? ''; });
-    setAnswerDrafts(drafts);
+    questions.forEach((q) => {
+      const raw = q.expected_answer ?? '';
+      drafts[q.id] = isGenericBenchmark(raw) ? '' : raw;
+    });
+    setAnswerDrafts(cleanBenchmarkDrafts(drafts));
   }, [questions]);
 
   const { data: users = [] } = useQuery({
@@ -133,23 +140,34 @@ export default function AssessmentDetailPage() {
     setTimeout(() => setSaveMessage(''), 2500);
   };
 
-  const runResearch = async () => {
+  /**
+   * One-shot generation from Step 1 client info: research + questions + expected answers.
+   * Saves client info first, then runs the full pipeline server-side, then advances to review.
+   */
+  const generateAll = async () => {
     if (!id) return;
     if (!clientForm.company_name.trim()) {
-      setResearchError('Enter a company name in Step 1 first');
+      setStepError('Company name is required before generating.');
       return;
     }
+    setStepError('');
     setResearchError('');
-    setGeneratingResearch(true);
+    setQuestionGenError('');
+    setGeneratingAll(true);
     try {
-      const result = await api.generateResearch(id, clientForm);
+      // Persist Step 1 data so the server generates from the latest client info
+      await api.updateAssessment(id, { ...clientForm, mark_step_complete: 1 });
+      const result = await api.generateAll(id);
       setResearchForm({ research_notes: result.research_notes, pain_point_ids: result.pain_point_ids });
-      qc.invalidateQueries({ queryKey: ['assessment', id] });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['assessment', id] }),
+        qc.invalidateQueries({ queryKey: ['questions', id] }),
+      ]);
+      goToStep(2);
     } catch (err) {
-      setResearchError(err instanceof Error ? err.message : 'Research generation failed');
-      researchAttemptedRef.current = null;
+      setStepError(err instanceof Error ? err.message : 'Generation failed');
     } finally {
-      setGeneratingResearch(false);
+      setGeneratingAll(false);
     }
   };
 
@@ -170,21 +188,6 @@ export default function AssessmentDetailPage() {
     onSuccess: async (_, vars) => {
       qc.invalidateQueries({ queryKey: ['assessment', id] });
       showSaved();
-
-      if (vars.advance && vars.step === 1 && id) {
-        await runResearch();
-      }
-
-      if (vars.advance && vars.step === 3 && id && questions.length === 0) {
-        setGeneratingQuestions(true);
-        setQuestionGenError('');
-        try {
-          await api.generateQuestions(id);
-          qc.invalidateQueries({ queryKey: ['questions', id] });
-        } catch (err) {
-          setQuestionGenError(err instanceof Error ? err.message : 'Question generation failed');
-        } finally { setGeneratingQuestions(false); }
-      }
 
       if (vars.advance && vars.step === 4 && id) {
         await saveAnswersMutation.mutateAsync();
@@ -211,49 +214,6 @@ export default function AssessmentDetailPage() {
     onError: (err) => setQuestionGenError(err instanceof Error ? err.message : 'Question generation failed'),
   });
 
-  const generateResearchMutation = useMutation({
-    mutationFn: () => api.generateResearch(id!, clientForm),
-    onSuccess: (result) => {
-      setResearchError('');
-      setResearchForm({ research_notes: result.research_notes, pain_point_ids: result.pain_point_ids });
-      qc.invalidateQueries({ queryKey: ['assessment', id] });
-    },
-    onError: (err) => setResearchError(err instanceof Error ? err.message : 'Research failed'),
-  });
-
-  useEffect(() => {
-    if (!id || !isManager || currentStep !== 2) return;
-    if (researchForm.research_notes.trim()) return;
-    if (researchAttemptedRef.current === id) return;
-    if (!clientForm.company_name.trim()) return;
-
-    researchAttemptedRef.current = id;
-    runResearch();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, isManager, currentStep, clientForm.company_name]);
-
-  useEffect(() => {
-    if (!id || !isManager || currentStep !== 4) return;
-    if (questions.length > 0) return;
-    if (questionsAttemptedRef.current === id) return;
-
-    questionsAttemptedRef.current = id;
-    setGeneratingQuestions(true);
-    setQuestionGenError('');
-    api.generateQuestions(id)
-      .then(() => qc.invalidateQueries({ queryKey: ['questions', id] }))
-      .catch((err) => {
-        questionsAttemptedRef.current = null;
-        setQuestionGenError(err instanceof Error ? err.message : 'Question generation failed');
-      })
-      .finally(() => setGeneratingQuestions(false));
-  }, [id, isManager, currentStep, questions.length, qc]);
-
-  useEffect(() => {
-    researchAttemptedRef.current = null;
-    questionsAttemptedRef.current = null;
-  }, [id]);
-
   const addQuestionMutation = useMutation({
     mutationFn: () => api.addQuestion(id!, {
       question_text: newQuestion.question_text,
@@ -276,6 +236,43 @@ export default function AssessmentDetailPage() {
     mutationFn: () => api.assignAssessment(id!, repId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['assessment', id] }),
   });
+
+  const approveMutation = useMutation({
+    mutationFn: () => api.approveAssessment(id!),
+    onSuccess: (data) => {
+      const url = (data as Assessment & { portal_url?: string }).portal_url;
+      if (url) setPortalUrl(`${window.location.origin}${url}`);
+      qc.invalidateQueries({ queryKey: ['assessment', id] });
+    },
+    onError: (err) => setStepError(err instanceof Error ? err.message : 'Approval failed'),
+  });
+
+  const generateAllBenchmarks = async () => {
+    if (!id) return;
+    setGeneratingBenchmarks(true);
+    setQuestionGenError('');
+    try {
+      await api.generateAllBenchmarks(id);
+      await qc.invalidateQueries({ queryKey: ['questions', id] });
+    } catch (err) {
+      setQuestionGenError(err instanceof Error ? err.message : 'Benchmark generation failed');
+    } finally {
+      setGeneratingBenchmarks(false);
+    }
+  };
+
+  const clearGenericBenchmarks = async () => {
+    if (!id) return;
+    await api.clearGenericBenchmarks(id);
+    setAnswerDrafts((d) => {
+      const next = { ...d };
+      for (const qid of Object.keys(next)) {
+        if (isGenericBenchmark(next[qid])) next[qid] = '';
+      }
+      return next;
+    });
+    await qc.invalidateQueries({ queryKey: ['questions', id] });
+  };
 
   const startSessionMutation = useMutation({
     mutationFn: () => api.startSession(id!),
@@ -358,6 +355,81 @@ export default function AssessmentDetailPage() {
   const stepMeta = ASSESSMENT_WIZARD_STEPS.find((s) => s.id === currentStep);
   const companyLabel = clientForm.company_name || assessment.client?.company_name || 'New Assessment';
   const answersComplete = missingAnswers(questions).length === 0;
+  const canRunLiveSession =
+    isRep &&
+    assessment.assigned_rep_id === user?.id &&
+    questions.length > 0 &&
+    ['assigned', 'in_session'].includes(assessment.status);
+  const repWaitingForAssign =
+    isRep && (!assessment.assigned_rep_id || assessment.assigned_rep_id !== user?.id);
+  const repNotReady = isRep && assessment.assigned_rep_id === user?.id && !['assigned', 'in_session', 'scored', 'completed'].includes(assessment.status);
+
+  if (isRep) {
+    return (
+      <Layout>
+        <div className="mx-auto max-w-3xl pb-10">
+          <Link to="/assessments" className="mb-4 inline-flex text-sm font-medium text-brand-primary hover:text-brand-navy">
+            ← Back to assessments
+          </Link>
+          <WizardHero
+            companyName={companyLabel}
+            status={STATUS_LABELS[assessment.status] || assessment.status}
+            stepLabel="Client session"
+            stepSubtitle="Live discovery with the executive"
+          />
+          <Badge className={`mb-4 ${STATUS_COLORS[assessment.status] || 'bg-slate-100'}`}>
+            {STATUS_LABELS[assessment.status] || assessment.status}
+          </Badge>
+
+          <AssessmentWorkflowHelp role="rep" />
+
+          {repWaitingForAssign && (
+            <p className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              This assessment has not been assigned to you yet. Your manager will notify you when it is ready.
+            </p>
+          )}
+
+          {repNotReady && (
+            <p className="mt-6 rounded-xl border border-brand-cream bg-brand-soft-light p-4 text-sm text-brand-slate">
+              Your manager is still preparing questions and benchmark answers. You will be able to start the live session once status is <strong>Assigned</strong>.
+            </p>
+          )}
+
+          {canRunLiveSession && (
+            <div className="mt-6 space-y-4">
+              <div className="rounded-2xl bg-slate-50 p-5 ring-1 ring-slate-100">
+                <p className="text-sm text-slate-600">
+                  <span className="font-semibold text-slate-900">{questions.length}</span> discovery questions ready
+                </p>
+                {assessment.pre_assessment_notes && (
+                  <p className="mt-3 line-clamp-4 text-sm text-slate-600">{assessment.pre_assessment_notes}</p>
+                )}
+              </div>
+              <NextStepBanner
+                title="Start live session with the client"
+                description="Ask each question and record their real answers. AI will score responses against the manager's benchmarks when you finish."
+                actionLabel="Start Live Session"
+                onAction={() => startSessionMutation.mutate()}
+                loading={startSessionMutation.isPending}
+              />
+            </div>
+          )}
+
+          {['scored', 'completed'].includes(assessment.status) && (
+            <div className="mt-6">
+              <NextStepBanner
+                title="Session complete"
+                description="View readiness scores and share insights with your manager."
+                actionLabel="View Results"
+                to={`/assessments/${id}/results`}
+              />
+            </div>
+          )}
+        </div>
+        <Chatbot assessmentId={id} />
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
@@ -389,6 +461,12 @@ export default function AssessmentDetailPage() {
           )}
         </div>
 
+        {isManager && currentStep <= 5 && (
+          <div className="mb-6">
+            <AssessmentWorkflowHelp role="manager" />
+          </div>
+        )}
+
         <AssessmentStepper
           steps={ASSESSMENT_WIZARD_STEPS}
           currentStep={currentStep}
@@ -406,6 +484,7 @@ export default function AssessmentDetailPage() {
           )}
 
           {currentStep === 1 && isManager && (
+            <div className="space-y-6">
             <div className="grid gap-5 sm:grid-cols-2">
               <div className="sm:col-span-2">
                 <Label>Company Name *</Label>
@@ -432,6 +511,15 @@ export default function AssessmentDetailPage() {
                   {industries.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
                 </Select>
               </div>
+              <div>
+                <Label>Country of Operation</Label>
+                <Input
+                  className="mt-1"
+                  placeholder="e.g. United States, UAE"
+                  value={clientForm.country_of_operation}
+                  onChange={(e) => setClientForm({ ...clientForm, country_of_operation: e.target.value })}
+                />
+              </div>
               <div className="sm:col-span-2">
                 <Label>Business Details</Label>
                 <textarea
@@ -450,30 +538,51 @@ export default function AssessmentDetailPage() {
                 <Input className="mt-1" type="email" value={clientForm.contact_email} onChange={(e) => setClientForm({ ...clientForm, contact_email: e.target.value })} />
               </div>
             </div>
+
+            <div className="rounded-2xl border border-brand-cream bg-brand-soft-light p-6">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-primary/10 text-brand-primary">
+                  <Sparkles className="h-5 w-5" />
+                </div>
+                <div className="flex-1">
+                  <p className="font-semibold text-brand-navy">Generate the assessment from this client info</p>
+                  <p className="mt-0.5 text-sm text-brand-slate">
+                    Deep research, tailored questions, and benchmark answers are all created from the details above.
+                    You'll review everything in the next steps — nothing is generated when you just click Continue.
+                  </p>
+                  <Button
+                    className="mt-4"
+                    onClick={generateAll}
+                    disabled={generatingAll || !clientForm.company_name.trim()}
+                  >
+                    {generatingAll ? (
+                      <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating research, questions & answers…</>
+                    ) : (
+                      <><Sparkles className="mr-2 h-4 w-4" /> {questions.length > 0 ? 'Regenerate Assessment Data' : 'Generate Assessment Data'}</>
+                    )}
+                  </Button>
+                  {questions.length > 0 && !generatingAll && (
+                    <p className="mt-2 text-xs text-brand-primary">
+                      Already generated — {questions.length} questions ready. Use Continue to review, or regenerate to start over.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+            </div>
           )}
 
           {currentStep === 2 && isManager && (
             <div className="space-y-6">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm text-slate-500">Deep research from Step 1 data via Gemini 2.5 Flash</p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={generatingResearch || generateResearchMutation.isPending}
-                  onClick={() => generateResearchMutation.mutate()}
-                >
-                  {generatingResearch || generateResearchMutation.isPending ? (
-                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="mr-1 h-4 w-4" />
-                  )}
-                  Regenerate
-                </Button>
+                <p className="text-sm text-slate-500">Deep research generated from Step 1. Edit freely or regenerate the full set from Step 1.</p>
+                {!researchForm.research_notes.trim() && (
+                  <span className="text-xs text-amber-600">No research yet — generate it from Step 1.</span>
+                )}
               </div>
               <ResearchPanel
                 content={researchForm.research_notes}
-                loading={generatingResearch || generateResearchMutation.isPending}
+                loading={generatingAll}
                 onChange={(v) => setResearchForm({ ...researchForm, research_notes: v })}
               />
               <div>
@@ -510,20 +619,29 @@ export default function AssessmentDetailPage() {
             <div className="space-y-6">
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-brand-soft-light px-4 py-3 ring-1 ring-brand-cream">
                 <div>
-                  <p className="font-semibold text-brand-navy">Questions & Expected Answers</p>
-                  <p className="text-xs text-brand-primary">Set benchmark answers before assigning to a rep</p>
+                  <p className="font-semibold text-brand-navy">Questions & benchmark answers</p>
+                  <p className="text-xs text-brand-primary">
+                    These are ideal answers for AI scoring — not what the client said. The rep captures real answers in the live session.
+                  </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <Button size="sm" variant="outline" onClick={() => saveAnswersMutation.mutate()} disabled={saveAnswersMutation.isPending}>
-                    <Save className="mr-1 h-4 w-4" /> Save Answers
+                    <Save className="mr-1 h-4 w-4" /> Save
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => generateQuestionsMutation.mutate()} disabled={generateQuestionsMutation.isPending || generatingQuestions}>
-                    <Sparkles className="mr-1 h-4 w-4" /> Regenerate
+                  <Button size="sm" variant="outline" onClick={() => generateQuestionsMutation.mutate()} disabled={generateQuestionsMutation.isPending}>
+                    <Sparkles className="mr-1 h-4 w-4" /> Regenerate Qs
+                  </Button>
+                  <Button size="sm" onClick={generateAllBenchmarks} disabled={generatingBenchmarks || questions.length === 0}>
+                    {generatingBenchmarks ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1 h-4 w-4" />}
+                    AI All Benchmarks
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={clearGenericBenchmarks}>
+                    Clear filler text
                   </Button>
                 </div>
               </div>
 
-              {(generatingQuestions || generateQuestionsMutation.isPending) && questions.length === 0 && (
+              {generateQuestionsMutation.isPending && questions.length === 0 && (
                 <div className="flex items-center justify-center rounded-2xl border border-brand-cream bg-brand-soft-light p-8">
                   <Loader2 className="mr-2 h-5 w-5 animate-spin text-brand-primary" />
                   <span className="text-sm text-brand-navy">Generating questions with Gemini 2.5 Flash...</span>
@@ -583,7 +701,7 @@ export default function AssessmentDetailPage() {
               <div className="grid gap-4 sm:grid-cols-3">
                 {[
                   { label: 'Questions', value: questions.length },
-                  { label: 'Answers set', value: questions.filter((q) => answerDrafts[q.id]?.trim()).length },
+                  { label: 'Benchmarks set', value: questions.filter((q) => answerDrafts[q.id]?.trim()).length },
                   { label: 'Documents', value: documents.length },
                 ].map((s) => (
                   <div key={s.label} className="rounded-2xl bg-slate-50 p-5 text-center ring-1 ring-slate-100">
@@ -594,13 +712,13 @@ export default function AssessmentDetailPage() {
               </div>
 
               <div>
-                <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-slate-500">Review Q&A Brief</h3>
+                <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-slate-500">Manager brief (questions + benchmarks)</h3>
                 <div className="max-h-80 space-y-3 overflow-y-auto">
                   {questions.map((q, i) => (
                     <div key={q.id} className="rounded-xl border border-slate-100 bg-slate-50/50 p-4">
                       <p className="text-sm font-medium text-slate-800">{i + 1}. {q.question_text}</p>
                       <p className="mt-2 text-sm text-brand-primary">
-                        <span className="font-medium text-slate-500">Expected: </span>
+                        <span className="font-medium text-slate-500">Benchmark: </span>
                         {answerDrafts[q.id]?.trim() || '—'}
                       </p>
                     </div>
@@ -608,7 +726,47 @@ export default function AssessmentDetailPage() {
                 </div>
               </div>
 
-              {isManager && (
+              {['approved', 'assigned', 'in_session', 'scored', 'completed'].includes(assessment.status) && (
+                <AssessmentDeliverablesRoadmap
+                  compact
+                  assessmentId={id!}
+                  assessment={assessment}
+                  highlight={
+                    assessment.status === 'scored' || assessment.status === 'completed'
+                      ? 'results'
+                      : assessment.assigned_rep_id
+                        ? 'session'
+                        : 'assign'
+                  }
+                />
+              )}
+
+              {isManager && assessment.status !== 'approved' && assessment.status !== 'assigned' && (
+                <div className="rounded-2xl border border-brand-cream bg-brand-soft-light p-6">
+                  <h3 className="mb-2 font-semibold text-slate-900">Approve assessment</h3>
+                  <p className="mb-4 text-sm text-brand-slate">
+                    Locks questions and benchmarks, and creates a client portal link (optional self-service).
+                  </p>
+                  <Button
+                    onClick={() => approveMutation.mutate()}
+                    disabled={!answersComplete || questions.length === 0 || approveMutation.isPending}
+                  >
+                    {approveMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                    Approve & get portal link
+                  </Button>
+                  {(portalUrl || assessment.portal_token) && (
+                    <p className="mt-3 break-all text-xs text-brand-primary">
+                      Client portal: {portalUrl || `${window.location.origin}/client/${assessment.portal_token}`}
+                    </p>
+                  )}
+                  <p className="mt-4 text-sm text-brand-slate">
+                    Next: use the <strong>After approval — demo path</strong> checklist below — assign a rep, then
+                    Results → Gap Analysis → Proposal.
+                  </p>
+                </div>
+              )}
+
+              {isManager && !assessment.assigned_rep && ['approved', 'assigned'].includes(assessment.status) && (
                 <div className="rounded-2xl border border-brand-cream bg-brand-soft-light p-6">
                   <h3 className="mb-3 font-semibold text-slate-900">Assign to Sales Rep</h3>
                   <div className="flex flex-wrap gap-3">
@@ -629,20 +787,36 @@ export default function AssessmentDetailPage() {
                 </div>
               )}
 
-              {assessment.assigned_rep && (
-                <p className="text-sm text-slate-600">Assigned to <strong>{assessment.assigned_rep.full_name}</strong></p>
+              {/* Manager / admin: assign rep — live session is rep-only */}
+              {isManager && !assessment.assigned_rep && questions.length > 0 && answersComplete && (
+                <p className="rounded-xl border border-brand-cream bg-brand-soft-light p-4 text-sm text-brand-slate">
+                  Assign a sales rep below. They will run the <strong>live session</strong> with the client; you do not need to repeat the questionnaire yourself.
+                </p>
               )}
 
-              {(isRep || user?.role_name === 'super_admin') && questions.length > 0 && ['assigned', 'in_session'].includes(assessment.status) && (
-                <Button size="lg" onClick={() => startSessionMutation.mutate()}>
-                  <Play className="mr-2 h-4 w-4" /> Start Live Session
-                </Button>
+              {isManager && assessment.assigned_rep && ['assigned', 'in_session'].includes(assessment.status) && (
+                <NextStepBanner
+                  title={`Assigned to ${assessment.assigned_rep.full_name}`}
+                  description="Waiting for the rep to complete the live client session. You will review AI-scored results here when they finish."
+                  secondary={{ label: 'Back to assessments', to: '/assessments' }}
+                />
+              )}
+
+              {isManager && assessment.assigned_rep && assessment.status === 'in_session' && (
+                <p className="text-sm text-brand-slate">Live session in progress — results will appear after the rep completes and scoring runs.</p>
+              )}
+
+              {/* Results are ready */}
+              {['scored', 'completed'].includes(assessment.status) && (
+                <NextStepBanner
+                  title="Session complete — results are ready"
+                  description="Review AI-scored readiness results, then move on to gap analysis and the client proposal."
+                  actionLabel="View Results"
+                  to={`/assessments/${id}/results`}
+                  secondary={{ label: 'Back to assessments', to: '/assessments' }}
+                />
               )}
             </div>
-          )}
-
-          {!isManager && currentStep < 5 && (
-            <p className="text-sm text-slate-500">Your manager is preparing this assessment.</p>
           )}
 
           {isManager && (

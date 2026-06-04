@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Sidebar } from './Sidebar';
 import { AppLogo } from './AppLogo';
+import { DemoModeBanner } from './DemoModeBanner';
 import { Bell, LogOut, Menu } from 'lucide-react';
 import { Button } from './ui/Button';
 
@@ -60,7 +61,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-y-auto bg-white p-4 lg:p-8">
+        <DemoModeBanner />
+
+        <main className="app-main-bg min-h-0 flex-1 overflow-y-auto p-4 lg:p-8">
           <div className="mx-auto max-w-6xl">{children}</div>
         </main>
       </div>
