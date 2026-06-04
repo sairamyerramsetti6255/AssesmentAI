@@ -4,7 +4,7 @@
 
 ### Option A — One app (recommended, fixes CORS)
 
-Serve **frontend + API on the same domain** (e.g. your API URL). No cross-origin requests.
+Serve **prototype UI + API on the same domain**. The root `Dockerfile` builds **prototype** (not `client`) and serves it from `/public`. All AI calls use **OpenRouter** on the Node server (`/api/research/*`, `/api/assessment/*`, `/api/chat/completions`).
 
 | Setting | Value |
 |---------|--------|
@@ -16,9 +16,11 @@ Serve **frontend + API on the same domain** (e.g. your API URL). No cross-origin
 
 ```
 PORT=3001
-GEMINI_API_KEY=your-key
-GEMINI_MODEL=gemini-2.5-flash
-CLIENT_URL=https://YOUR-DOMAIN
+OPENROUTER_API_KEY=your-openrouter-key
+OPENROUTER_MODEL=nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+OPENROUTER_SITE_URL=https://assessment.pbshope.in
+OPENROUTER_APP_NAME=AI Readiness Assessment
+CLIENT_URL=https://assessment.pbshope.in
 SERVE_CLIENT=true
 ```
 

@@ -1,0 +1,97 @@
+{
+  "leadIntakeFormSamples": [
+    {
+      "companyName": "Aurora Health Systems",
+      "industry": "Healthcare",
+      "domain": "aurorahealth.io",
+      "country": "Canada",
+      "documents": [
+        "clinical-data-map-v2.pdf",
+        "hipaa-gap-assessment.docx",
+        "legacy-ehr-integration-diagram.pdf"
+      ]
+    },
+    {
+      "companyName": "Velocity Freight Co.",
+      "industry": "Supply Chain",
+      "domain": "velocityfreight.de",
+      "country": "Germany",
+      "documents": ["fleet-telematics-export.pdf", "warehouse-sop-2025.docx"]
+    },
+    {
+      "companyName": "Brightline Media",
+      "industry": "Retail",
+      "domain": "brightlinemedia.co.jp",
+      "country": "Japan",
+      "documents": ["cdp-architecture.pdf", "personalization-rfp-responses.docx"]
+    },
+    {
+      "companyName": "Copper Ridge Energy",
+      "industry": "Manufacturing",
+      "domain": "copperridge.energy",
+      "country": "United States",
+      "documents": [
+        "scada-asset-registry.pdf",
+        "predictive-maintenance-pilot-notes.docx"
+      ]
+    },
+    {
+      "companyName": "Harbor Capital Partners",
+      "industry": "Financial Services",
+      "domain": "harborcapital.lu",
+      "country": "Luxembourg",
+      "documents": [
+        "model-risk-management-policy.pdf",
+        "aml-transaction-monitoring-audit.pdf"
+      ]
+    }
+  ],
+  "pipelineRemarkSamples": [
+    "CFO aligned on 90-day pilot budget; legal reviewing DPA addendum.",
+    "Competitor benchmark shared — client prefers phased rollout vs. big-bang.",
+    "Data steward identified; catalog refresh scheduled before model training.",
+    "Risk committee flagged EU AI Act high-risk classification for credit scoring use case.",
+    "Follow-up call 12 Jun — demo agentic workflow on sample shipment dataset.",
+    "Champion (VP Ops) leaving in Q3; need succession sponsor before proposal sign-off."
+  ],
+  "clientAssessmentByToken": {
+    "prt-demo-8f3a": {
+      "company": "Pacific Retail Group",
+      "answers": {
+        "q-1": 6,
+        "q-2": ["Incomplete records", "Siloed warehouses", "PII consent gaps"],
+        "q-3": 7,
+        "q-4": ["Legacy on-prem WMS", "RFID partial rollout"],
+        "q-6": ["GDPR", "Industry-specific (PCI/HIPAA)"],
+        "q-7": ["AWS", "Multi-cloud"],
+        "q-8": 3,
+        "q-9": 5,
+        "q-10": ["Skills gap", "Budget cycles"],
+        "q-12": 2
+      },
+      "richtext": {
+        "q-5": "Quarterly AI governance board chaired by CIO; use cases >$50k require legal + risk sign-off within 10 business days.",
+        "q-11": "Store-level basket affinity and real-time promo elasticity data remain in regional POS silos—not yet in the lakehouse."
+      }
+    },
+    "sfs-demo-2c91": {
+      "company": "Summit Financial Services",
+      "answers": {
+        "q-1": 8,
+        "q-2": ["Stale timestamps", "Duplicate customer IDs"],
+        "q-3": 4,
+        "q-4": ["WMS cloud-native"],
+        "q-6": ["GDPR", "EU AI Act", "SOC 2"],
+        "q-7": ["Azure", "Private cloud only"],
+        "q-8": 4,
+        "q-9": 7,
+        "q-10": ["Executive sponsorship turnover"],
+        "q-12": 4
+      },
+      "richtext": {
+        "q-5": "Model risk management forum meets monthly; all LLM deployments require documented fallback and human review for client communications.",
+        "q-11": "Trade surveillance alerts and correspondent banking KYC files are high-value but restricted to on-prem analytics VLAN."
+      }
+    }
+  }
+}

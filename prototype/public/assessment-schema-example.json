@@ -1,0 +1,39 @@
+{
+  "userDomain": "Healthcare — Hospital & Clinical Networks",
+  "taxonomy": {
+    "technicalPainPoints": [
+      "Legacy EHR silos and HL7/FHIR interface gaps",
+      "Clinical data lake immaturity and consent tagging",
+      "Medical imaging PACS integration latency",
+      "API rate limits on payer eligibility systems"
+    ],
+    "operationalPainAreas": [
+      "HIPAA / regional privacy compliance for AI training",
+      "Clinical staff AI literacy and nursing change fatigue",
+      "Joint commission documentation for algorithmic triage",
+      "Vendor BAA negotiation cycles"
+    ],
+    "processImprovements": [
+      "Manual prior-authorization fax workflows",
+      "Bed management staffing allocation",
+      "Discharge planning handoff delays",
+      "Operating room block scheduling conflicts"
+    ]
+  },
+  "questions": [
+    {
+      "taxonomyPillar": "Technical Pain Points",
+      "domainContext": "EHR interoperability",
+      "text": "How would you rate real-time clinical data availability across acute and ambulatory EHR instances?",
+      "type": "slider",
+      "sortOrder": 0
+    },
+    {
+      "taxonomyPillar": "Non-Technical / Operational Pain Areas",
+      "domainContext": "Compliance",
+      "text": "Describe your governance process for models that influence triage or treatment recommendations.",
+      "type": "richtext",
+      "sortOrder": 1
+    }
+  ]
+}

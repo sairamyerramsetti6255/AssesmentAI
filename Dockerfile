@@ -1,11 +1,12 @@
 # Coolify full-stack: Base Directory = . (repo root), Dockerfile = Dockerfile
 # Frontend + API on ONE domain — no CORS issues. API at /api
 
+# Prototype SPA (replaces client on same domain) — API calls go to /api on this server
 FROM node:22-alpine AS client-build
-WORKDIR /app/client
-COPY client/package.json client/package-lock.json ./
+WORKDIR /app/prototype
+COPY prototype/package.json prototype/package-lock.json ./
 RUN npm ci
-COPY client/ ./
+COPY prototype/ ./
 ENV VITE_API_URL=/api
 RUN npm run build
 
@@ -24,6 +25,6 @@ ENV SERVE_CLIENT=true
 COPY server/package.json server/package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=server-build /app/server/dist ./dist
-COPY --from=client-build /app/client/dist ./public
+COPY --from=client-build /app/prototype/dist ./public
 EXPOSE 3001
 CMD ["node", "dist/index.js"]

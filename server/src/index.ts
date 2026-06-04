@@ -23,7 +23,9 @@ import adminRoutes from './routes/admin.js';
 import auditRoutes from './routes/audit.js';
 import mastersRoutes from './routes/masters.js';
 import portalRoutes from './routes/portal.js';
+import prototypeAiRoutes from './routes/prototypeAi.js';
 import { demoStore } from './lib/demoStore.js';
+import { getOpenRouterConfigFromEnv } from './lib/openrouter/openrouterClient.js';
 import { loadAuthSessions } from './lib/sessionStore.js';
 
 dotenv.config();
@@ -62,15 +64,21 @@ app.options('*', cors({
 app.use(express.json({ limit: '50mb' }));
 
 app.get('/api/health', (_req, res) => {
+  const or = getOpenRouterConfigFromEnv();
   res.json({
     status: 'ok',
     mode: 'memory',
     gemini: isGeminiConfigured(),
     gemini_model: isGeminiConfigured() ? GEMINI_MODEL : null,
+    openrouter: Boolean(or),
+    openrouter_model: or?.model ?? null,
     cors_origins: allowedOrigins,
     timestamp: new Date().toISOString(),
   });
 });
+
+/** Prototype UI — OpenRouter AI routes only (same-origin /api/*). */
+app.use('/api', prototypeAiRoutes);
 
 app.use('/api/masters', mastersRoutes);
 app.use('/api/portal', portalRoutes);
