@@ -1,6 +1,7 @@
 import { demoStore, type Client } from './demoStore.js';
 import type { MasterDriver } from './demoStore.js';
 import { geminiGenerateJSON, geminiTranscribeAudio, isGeminiConfigured } from './gemini.js';
+import { isGenericBenchmark, sanitizeBenchmark } from './benchmarkUtils.js';
 
 export function parseBusinessDomains(client: { business_domains?: string[]; domain?: string | null }): string[] {
   if (client.business_domains?.length) return client.business_domains;
@@ -270,6 +271,7 @@ function normalizeQuestion(q: GeneratedQuestion, drivers: MasterDriver[]): Gener
     if (!options || options.length < 2) {
       options = ['Not started', 'In progress', 'Mature / fully adopted'];
     }
+    if (options.length > 5) options = options.slice(0, 5);
   } else {
     options = undefined;
   }
@@ -283,16 +285,269 @@ function normalizeQuestion(q: GeneratedQuestion, drivers: MasterDriver[]): Gener
   };
 }
 
-function fallbackQuestions(drivers: MasterDriver[]): GeneratedQuestion[] {
-  return demoStore.masters.questions.slice(0, 12).map((mq) => {
-    const driver = drivers.find((d) => d.id === mq.driver_id) || drivers[0];
-    return {
-      driver_key: driver.driver_key,
-      question_text: mq.question_text,
-      question_type: (VALID_TYPES.has(mq.question_type) ? mq.question_type : 'rating') as GeneratedQuestion['question_type'],
-      is_required: mq.is_required,
-    };
+/** Target mix: ~5 rating, ~3 multi_select, ~3 text, ~3 voice (12–15 total). */
+const TARGET_TYPE_MIX: Record<GeneratedQuestion['question_type'], number> = {
+  rating: 5,
+  multi_select: 3,
+  text: 3,
+  voice: 3,
+};
+const MIN_QUESTIONS = 12;
+const MAX_QUESTIONS = 15;
+const MIN_PER_DRIVER = 2;
+
+type QuestionBuildContext = {
+  companyName: string;
+  industryName: string;
+  businessDomains: string[];
+};
+
+function questionQualityScore(q: GeneratedQuestion): number {
+  return q.question_text.length + (q.options?.length || 0) * 5;
+}
+
+function dedupeQuestions(questions: GeneratedQuestion[]): GeneratedQuestion[] {
+  const seen = new Set<string>();
+  return questions.filter((q) => {
+    const key = q.question_text.toLowerCase().replace(/\s+/g, ' ').slice(0, 200);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
+}
+
+function syntheticQuestion(
+  driver: MasterDriver,
+  question_type: GeneratedQuestion['question_type'],
+  ctx: QuestionBuildContext,
+  variant: number,
+): GeneratedQuestion {
+  const domain = ctx.businessDomains[0] || ctx.industryName;
+  const co = ctx.companyName;
+
+  const byDriver: Record<string, Record<GeneratedQuestion['question_type'], string[]>> = {
+    business_strategy: {
+      rating: [
+        `On a 1–5 scale, how clearly has ${co} linked AI investments to measurable ${domain} KPIs and executive accountability?`,
+        `How mature is ${co}'s roadmap for prioritizing AI use cases against revenue, risk, and compliance goals in ${ctx.industryName}?`,
+      ],
+      multi_select: [
+        `Which strategic planning rhythms does ${co} use today to fund and govern AI initiatives?`,
+      ],
+      text: [
+        `List the top three business outcomes ${co} expects from AI in the next 12 months (metrics, owners, systems involved).`,
+      ],
+      voice: [
+        `Walk us through how ${co}'s leadership team today decides which AI bets to fund, pause, or kill—and where that process breaks down.`,
+      ],
+    },
+    technology_data: {
+      rating: [
+        `Rate (1–5) how integrated ${co}'s core data sources are for analytics and AI across ${domain} operations.`,
+      ],
+      multi_select: [
+        `Which data platform patterns best describe ${co}'s current ${ctx.industryName} stack?`,
+      ],
+      text: [
+        `Which CRM, ERP, data warehouse, and integration tools does ${co} rely on—and where do exports or manual spreadsheets still bridge gaps?`,
+      ],
+      voice: [
+        `Describe a recent workflow at ${co} where teams had to manually reconcile data between systems before making a decision.`,
+      ],
+    },
+    ai_strategy: {
+      rating: [
+        `How formalized is ${co}'s AI governance (policies, model review, vendor risk) for production use cases in ${ctx.industryName}?`,
+      ],
+      multi_select: [
+        `Which AI delivery models is ${co} actively using or piloting?`,
+      ],
+      text: [
+        `What AI solutions, copilots, or automations is ${co} already building or evaluating—include vendors and internal owners if known.`,
+      ],
+      voice: [
+        `Tell us about an AI initiative ${co} attempted recently: intent, stakeholders, blockers, and what you would do differently.`,
+      ],
+    },
+    org_culture: {
+      rating: [
+        `Rate frontline readiness at ${co} to adopt AI-assisted workflows in ${domain} (training, change management, incentives).`,
+      ],
+      multi_select: [
+        `How does ${co} typically upskill teams on new digital or AI tooling?`,
+      ],
+      text: [
+        `Which roles or departments at ${co} would be first impacted by AI—and what resistance or skills gaps do you anticipate?`,
+      ],
+      voice: [
+        `Share how employees at ${co} react when automation touches their day-to-day work—examples help.`,
+      ],
+    },
+    infrastructure: {
+      rating: [
+        `Rate ${co}'s cloud/MLOps readiness to deploy and monitor models in ${ctx.industryName} (1 = ad hoc, 5 = industrialized).`,
+      ],
+      multi_select: [
+        `Which infrastructure capabilities does ${co} have in place for AI workloads?`,
+      ],
+      text: [
+        `Document ${co}'s hosting model, identity/security controls, and any legacy systems that constrain real-time AI.`,
+      ],
+      voice: [
+        `Explain how ${co} today deploys or would deploy an AI feature end-to-end—from data access to user-facing app.`,
+      ],
+    },
+  };
+
+  const multiOptionsByDriver: Record<string, string[][]> = {
+    business_strategy: [
+      ['Annual board-level AI roadmap', 'Quarterly portfolio reviews', 'Ad hoc project approvals', 'No formal rhythm yet'],
+      ['OKR-linked AI funding', 'Innovation lab / sandbox budget', 'Department P&L owners', 'Vendor-led pilots only'],
+    ],
+    technology_data: [
+      ['Cloud warehouse + dbt/ELT', 'Operational DB replication', 'Spreadsheet-heavy reporting', 'Siloed departmental databases'],
+      ['Real-time event streaming', 'Nightly batch only', 'API-led integrations', 'Manual CSV exports'],
+    ],
+    ai_strategy: [
+      ['Buy SaaS copilots', 'Custom LLM apps', 'Traditional ML only', 'Exploring, not in production'],
+      ['Central AI CoE', 'Embedded product squads', 'External SI partners', 'No dedicated owner'],
+    ],
+    org_culture: [
+      ['Mandatory training paths', 'Optional lunch-and-learns', 'On-the-job shadowing', 'Minimal formal training'],
+      ['Champions network', 'Executive sponsors only', 'Union/work-council review', 'No change program yet'],
+    ],
+    infrastructure: [
+      ['Kubernetes + CI/CD for models', 'Managed ML platform (SageMaker/Azure ML)', 'VM-based scripts', 'On-prem only'],
+      ['Full observability for models', 'Basic logging only', 'No production models yet', 'Third-party hosts everything'],
+    ],
+  };
+
+  const pack = byDriver[driver.driver_key] || byDriver.business_strategy;
+  const texts = pack[question_type];
+  const text = texts[variant % texts.length] || texts[0];
+
+  let options: string[] | undefined;
+  if (question_type === 'multi_select') {
+    const opts = multiOptionsByDriver[driver.driver_key] || multiOptionsByDriver.business_strategy;
+    options = opts[variant % opts.length] || opts[0];
+  }
+
+  return {
+    driver_key: driver.driver_key,
+    question_text: text,
+    question_type,
+    options,
+    is_required: true,
+  };
+}
+
+function ensureDriverCoverage(
+  questions: GeneratedQuestion[],
+  drivers: MasterDriver[],
+  ctx: QuestionBuildContext,
+): GeneratedQuestion[] {
+  const out = [...questions];
+  const counts = new Map<string, number>();
+  for (const d of drivers) counts.set(d.driver_key, 0);
+  for (const q of out) counts.set(q.driver_key, (counts.get(q.driver_key) || 0) + 1);
+
+  const typeOrder: GeneratedQuestion['question_type'][] = ['rating', 'multi_select', 'text', 'voice'];
+  let synth = 0;
+
+  for (const driver of drivers) {
+    while ((counts.get(driver.driver_key) || 0) < MIN_PER_DRIVER) {
+      const type = typeOrder[synth % typeOrder.length];
+      out.push(syntheticQuestion(driver, type, ctx, synth++));
+      counts.set(driver.driver_key, (counts.get(driver.driver_key) || 0) + 1);
+    }
+  }
+  return out;
+}
+
+function enforceQuestionTypeMix(
+  questions: GeneratedQuestion[],
+  drivers: MasterDriver[],
+  ctx: QuestionBuildContext,
+): GeneratedQuestion[] {
+  const sorted = [...questions].sort((a, b) => questionQualityScore(b) - questionQualityScore(a));
+  const buckets: Record<GeneratedQuestion['question_type'], GeneratedQuestion[]> = {
+    rating: [],
+    multi_select: [],
+    text: [],
+    voice: [],
+  };
+  for (const q of sorted) buckets[q.question_type].push(q);
+
+  const selected: GeneratedQuestion[] = [];
+  for (const type of Object.keys(TARGET_TYPE_MIX) as GeneratedQuestion['question_type'][]) {
+    const take = TARGET_TYPE_MIX[type];
+    selected.push(...buckets[type].slice(0, take));
+    buckets[type] = buckets[type].slice(take);
+  }
+
+  const counts = () => {
+    const c = { rating: 0, multi_select: 0, text: 0, voice: 0 };
+    for (const q of selected) c[q.question_type]++;
+    return c;
+  };
+
+  let c = counts();
+  let synth = 0;
+  for (const type of Object.keys(TARGET_TYPE_MIX) as GeneratedQuestion['question_type'][]) {
+    while (c[type] < TARGET_TYPE_MIX[type]) {
+      const driver = drivers[synth % drivers.length];
+      selected.push(syntheticQuestion(driver, type, ctx, synth++));
+      c = counts();
+    }
+  }
+
+  while (selected.length < MIN_QUESTIONS) {
+    const type = (Object.keys(TARGET_TYPE_MIX) as GeneratedQuestion['question_type'][]).find(
+      (t) => c[t] < TARGET_TYPE_MIX[t] + 1,
+    ) || 'rating';
+    const driver = drivers[synth % drivers.length];
+    selected.push(syntheticQuestion(driver, type, ctx, synth++));
+    c = counts();
+  }
+
+  const trimOrder: GeneratedQuestion['question_type'][] = ['rating', 'multi_select', 'text', 'voice'];
+  let trimIdx = 0;
+  while (selected.length > MAX_QUESTIONS) {
+    const type = trimOrder[trimIdx % trimOrder.length];
+    const idx = selected.map((q, i) => ({ q, i })).filter(({ q }) => q.question_type === type).pop()?.i;
+    if (idx !== undefined) selected.splice(idx, 1);
+    else selected.pop();
+    trimIdx++;
+    c = counts();
+  }
+
+  return selected;
+}
+
+function finalizeQuestionSet(
+  questions: GeneratedQuestion[],
+  drivers: MasterDriver[],
+  ctx: QuestionBuildContext,
+): GeneratedQuestion[] {
+  const deduped = dedupeQuestions(questions);
+  const withDrivers = ensureDriverCoverage(deduped, drivers, ctx);
+  return enforceQuestionTypeMix(withDrivers, drivers, ctx);
+}
+
+function buildMixedFallbackQuestions(
+  drivers: MasterDriver[],
+  ctx: QuestionBuildContext,
+): GeneratedQuestion[] {
+  const draft: GeneratedQuestion[] = [];
+  const types: GeneratedQuestion['question_type'][] = ['rating', 'multi_select', 'text', 'voice'];
+  let i = 0;
+  for (const driver of drivers) {
+    for (let n = 0; n < MIN_PER_DRIVER; n++) {
+      draft.push(syntheticQuestion(driver, types[i % types.length], ctx, i));
+      i++;
+    }
+  }
+  return finalizeQuestionSet(draft, drivers, ctx);
 }
 
 export async function generateAssessmentQuestions(assessmentId: string): Promise<GeneratedQuestion[]> {
@@ -312,28 +567,57 @@ Pain Points: ${painPointNames.join(', ') || 'None selected'}
 Documents: ${docSummaries.length ? JSON.stringify(docSummaries).slice(0, 3000) : 'None uploaded'}
 `.trim();
 
+  const buildCtx: QuestionBuildContext = {
+    companyName: client.company_name,
+    industryName,
+    businessDomains,
+  };
+
   if (!isGeminiConfigured()) {
-    return fallbackQuestions(drivers);
+    return buildMixedFallbackQuestions(drivers, buildCtx);
   }
 
   const driverList = drivers.map((d) => `${d.driver_key} (${d.driver_name})`).join(', ');
 
-  const prompt = `You are an expert AI readiness assessor. Generate assessment questions for a LIVE client discovery session.
+  const prompt = `You are an expert AI Readiness Assessor and Technical Analyst. Generate a highly tailored, conversational discovery questionnaire for a live executive session to uncover tech infrastructure gaps, manual bottlenecks, and strategic AI opportunities.
 
-CLIENT CONTEXT:
+### COGNITIVE PREPARATION:
+Before generating questions, cross-reference and synthesize:
+1. **Uploaded Documents:** Analyze the executive's uploaded files to extract current software, hardware, operational workflows, and explicit pain points.
+2. **Client Website/Domain:** Analyze their web presence to understand their precise business model, service delivery channels, and customer touchpoints.
+3. **Competitive Landscape:** Benchmark against regional competitors within their country of operation to identify standard tech adoption levels and market pressures.
+
+### INPUT CONTEXT:
+**Client Context & Data:**
 ${contextBlock}
 
-DRIVERS (use driver_key exactly as listed): ${driverList}
+**Core Drivers (Use exact keys):** ${driverList}
 
-Generate exactly 12 to 15 questions tailored to this client. Requirements:
-- At least 2 questions per driver (all 5 drivers must be covered)
-- Mix: ~5 rating, ~3 text, ~2 voice, ~2 multi_select
-- question_text: conversational, specific to ${client.company_name} and ${industryName} (never generic)
-- rating: 1-5 scale questions about maturity/readiness
-- voice: questions where spoken client context is valuable
-- multi_select: include 3-5 distinct options in the options array
-- Do NOT include expected answers — managers will set those separately
-- Reference details from research notes when relevant`;
+### REQUIREMENTS:
+1. **Total Count:** Exactly 12 to 15 questions uniquely tailored to ${client.company_name} (${industryName} industry).
+2. **Driver Coverage:** At least 2 questions mapped to each driver key provided.
+3. **Format Mix:**
+   * **~5 rating:** (1-5 maturity scale)
+   * **~3 multi_select:** (3-5 smart options mirroring standard practices of regional competitors and domain standards)
+   * **~3 text:** (for tool/infrastructure specifications)
+   * **~3 voice:** (for complex, narrative workflow descriptions)
+4. **Targeted Deep-Dives:**
+   * **Gaps & Infrastructure:** Target hidden manual bottlenecks, legacy stack limitations, and data silos.
+   * **Aspirations:** Directly ask about the exact solutions, workflows, or AI capabilities they are already thinking about or attempting to build.
+5. **Tone:** Domain-expert, conversational, and highly specific (never generic). Do not output expected answers.
+
+### OUTPUT JSON FORMAT (wrap in "questions" array):
+Each item must use question_type exactly as one of: rating, multi_select, text, voice.
+[
+  {
+    "driver_key": "exact_driver_key_from_list",
+    "question_type": "rating | multi_select | text | voice",
+    "question_text": "Highly contextual question text targeting their tech, manual gaps, or desired solutions...",
+    "options": ["Option A", "Option B", "Option C"]
+  }
+]
+Include "options" ONLY for multi_select (3-5 options). Omit options for rating, text, and voice.
+You MUST return exactly 5 rating, 3 multi_select, 3 text, and 3 voice questions (14 total) unless driver count forces 12-15.`;
 
   const useTemplateFallback = (err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
@@ -350,7 +634,7 @@ Generate exactly 12 to 15 questions tailored to this client. Requirements:
   } catch (err) {
     if (useTemplateFallback(err)) {
       console.warn('Gemini unreachable — using template questions:', err);
-      return fallbackQuestions(drivers);
+      return buildMixedFallbackQuestions(drivers, buildCtx);
     }
     console.error('Gemini question generation failed, retrying without schema:', err);
     try {
@@ -360,7 +644,7 @@ Generate exactly 12 to 15 questions tailored to this client. Requirements:
     } catch (retryErr) {
       if (useTemplateFallback(retryErr)) {
         console.warn('Gemini retry failed — using template questions');
-        return fallbackQuestions(drivers);
+        return buildMixedFallbackQuestions(drivers, buildCtx);
       }
       throw retryErr;
     }
@@ -371,15 +655,28 @@ Generate exactly 12 to 15 questions tailored to this client. Requirements:
     .filter((q): q is GeneratedQuestion => q !== null);
 
   if (normalized.length < 8) {
-    console.warn(`Only ${normalized.length} valid questions from Gemini; supplementing with templates`);
-    const existing = new Set(normalized.map((q) => q.question_text));
-    for (const fb of fallbackQuestions(drivers)) {
-      if (normalized.length >= 12) break;
-      if (!existing.has(fb.question_text)) normalized.push(fb);
+    console.warn(`Only ${normalized.length} valid questions from Gemini; supplementing with contextual templates`);
+    const existing = new Set(normalized.map((q) => q.question_text.toLowerCase()));
+    for (const fb of buildMixedFallbackQuestions(drivers, buildCtx)) {
+      if (normalized.length >= MIN_QUESTIONS) break;
+      const key = fb.question_text.toLowerCase();
+      if (!existing.has(key)) {
+        normalized.push(fb);
+        existing.add(key);
+      }
     }
   }
 
-  return normalized.slice(0, 18);
+  const finalized = finalizeQuestionSet(normalized, drivers, buildCtx);
+  const mix = finalized.reduce(
+    (acc, q) => {
+      acc[q.question_type] = (acc[q.question_type] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
+  console.info(`Question mix for ${client.company_name}:`, mix, `total=${finalized.length}`);
+  return finalized;
 }
 
 const EXPECTED_ANSWER_SCHEMA = {
@@ -389,6 +686,24 @@ const EXPECTED_ANSWER_SCHEMA = {
   },
   required: ['expected_answer'],
 };
+
+/** Snap an arbitrary model string to one of the allowed options (case-insensitive, fuzzy). */
+function matchOption(raw: string, options: string[]): string {
+  const cleaned = raw.trim().replace(/^["'\s]+|["'\s.]+$/g, '');
+  const lower = cleaned.toLowerCase();
+  const exact = options.find((o) => o.toLowerCase() === lower);
+  if (exact) return exact;
+  const contains = options.find((o) => lower.includes(o.toLowerCase()) || o.toLowerCase().includes(lower));
+  if (contains) return contains;
+  return options[options.length - 1]; // assume options ordered ascending maturity
+}
+
+/** Clamp a model string to a valid rating value within the question's range. */
+function matchRating(raw: string, min: number, max: number): number {
+  const n = parseInt(raw.replace(/[^0-9-]/g, ''), 10);
+  if (Number.isNaN(n)) return max;
+  return Math.min(max, Math.max(min, n));
+}
 
 export async function generateExpectedAnswer(assessmentId: string, questionId: string): Promise<string> {
   const ctx = getAssessmentContext(assessmentId);
@@ -401,46 +716,116 @@ export async function generateExpectedAnswer(assessmentId: string, questionId: s
 
   const { assessment, client, industryName, businessDomains } = ctx;
   const driver = demoStore.masters.drivers.find((d) => d.id === question.driver_id);
-
-  const optionsHint = question.options?.length
-    ? `Available options: ${question.options.join(' | ')}`
-    : '';
-
-  if (!isGeminiConfigured()) {
-    return `Based on ${client.company_name}'s profile in ${industryName}, a mature organization would demonstrate strong capability in ${driver?.driver_name || 'this area'} with documented processes and measurable outcomes.`;
-  }
-
-  const prompt = `You are an AI readiness consultant helping a sales manager set a BENCHMARK expected answer before a live client session.
-
-CLIENT: ${client.company_name} (${industryName})
-DOMAINS: ${businessDomains.join(', ') || 'General'}
-RESEARCH SUMMARY: ${(assessment.pre_assessment_notes || '').slice(0, 2500)}
-
-QUESTION TYPE: ${question.question_type}
-DRIVER: ${driver?.driver_name || 'General'}
-QUESTION: ${question.question_text}
-${optionsHint}
-
-Write a natural-language expected answer (2-4 sentences) the manager can use as a benchmark during prep.
-- For rating questions: describe maturity level and evidence — do NOT reply with only a number like "3" or "4"
-- For multi_select: name the best option and briefly explain why
-- For text/voice: provide substantive talking points
-- Be specific to this client and industry`;
+  const qType = question.question_type;
+  const options = question.options?.filter((o) => typeof o === 'string' && o.trim()) || [];
+  const ratingMin = question.rating_min ?? 1;
+  const ratingMax = question.rating_max ?? 5;
+  const ratingLabel = (val: number) => question.rating_labels?.[String(val)] || '';
 
   const useTemplateFallback = (err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
     return msg.includes('TLS') || msg.includes('Could not reach Gemini') || msg.includes('fetch failed') || msg.includes('suspended');
   };
 
+  const clientContext = `CLIENT: ${client.company_name} (${industryName})
+DOMAINS: ${businessDomains.join(', ') || 'General'}
+RESEARCH SUMMARY: ${(assessment.pre_assessment_notes || '').slice(0, 2000)}
+DRIVER: ${driver?.driver_name || 'General'}
+QUESTION: ${question.question_text}`;
+
+  // ---- multi_select: pick exactly ONE of the provided options (no prose) ----
+  if (qType === 'multi_select') {
+    if (options.length === 0) return '';
+    if (!isGeminiConfigured()) return options[options.length - 1];
+    const prompt = `You are setting the benchmark answer for a multiple-choice AI readiness question.
+${clientContext}
+OPTIONS (choose exactly ONE): ${options.map((o, i) => `${i + 1}. ${o}`).join(' | ')}
+
+Return the single option text that represents the IDEAL/most mature expected answer for this client.
+Respond with ONLY the exact option text — no explanation, no extra words.`;
+    try {
+      const result = await geminiGenerateJSON<{ expected_answer: string }>(prompt, EXPECTED_ANSWER_SCHEMA);
+      const raw = result.expected_answer || '';
+      const cleaned = finalizeBenchmark(raw) || raw;
+      return matchOption(cleaned, options);
+    } catch (err) {
+      if (useTemplateFallback(err)) return options[options.length - 1];
+      throw err;
+    }
+  }
+
+  // ---- rating: return the expected rating value (radio buttons), not prose ----
+  if (qType === 'rating') {
+    const fallbackVal = ratingMax;
+    const fmt = (v: number) => (ratingLabel(v) ? `${v} — ${ratingLabel(v)}` : String(v));
+    if (!isGeminiConfigured()) return fmt(fallbackVal);
+    const labelsHint = question.rating_labels
+      ? `Scale labels: ${Object.entries(question.rating_labels).map(([k, v]) => `${k}=${v}`).join(', ')}`
+      : '';
+    const prompt = `You are setting the benchmark rating for an AI readiness question.
+${clientContext}
+RATING SCALE: ${ratingMin} to ${ratingMax}. ${labelsHint}
+
+Return the single ideal rating VALUE (a number between ${ratingMin} and ${ratingMax}) that a mature client should reach.
+Respond with ONLY the number — no explanation.`;
+    try {
+      const result = await geminiGenerateJSON<{ expected_answer: string }>(prompt, EXPECTED_ANSWER_SCHEMA);
+      return fmt(matchRating(result.expected_answer || '', ratingMin, ratingMax));
+    } catch (err) {
+      if (useTemplateFallback(err)) return fmt(fallbackVal);
+      throw err;
+    }
+  }
+
+  // ---- text / voice: specific benchmark prose (never generic templates) ----
+  if (!isGeminiConfigured()) {
+    return '';
+  }
+
+  const voiceHint =
+    qType === 'voice'
+      ? 'Write what a mature client would SAY aloud in 3-5 sentences (first person plural is fine). This is a transcript benchmark.'
+      : 'Write 2-4 sentences the client would type as a mature answer.';
+
+  const prompt = `You are an AI readiness consultant writing a BENCHMARK answer for scoring (manager-only, not shown to client during the call).
+${clientContext}
+QUESTION TYPE: ${qType}
+${voiceHint}
+
+Rules:
+- Be specific to ${client.company_name} and ${industryName} — mention real systems, workflows, or metrics where possible.
+- Do NOT use phrases like "documented strategy, accountable ownership, measurable KPIs" as filler.
+- Do NOT start with "Expected mature response" or similar meta text.
+- Return only the benchmark answer text.`;
+
   try {
     const result = await geminiGenerateJSON<{ expected_answer: string }>(prompt, EXPECTED_ANSWER_SCHEMA);
-    return result.expected_answer?.trim() || '';
+    const raw = result.expected_answer?.trim() || '';
+    if (isGenericBenchmark(raw)) return '';
+    return raw;
   } catch (err) {
-    if (useTemplateFallback(err)) {
-      return `Expected mature response for ${driver?.driver_name || 'this driver'}: documented strategy, accountable ownership, and measurable KPIs aligned to ${client.company_name}'s ${industryName} context.`;
-    }
+    if (useTemplateFallback(err)) return '';
     throw err;
   }
+}
+
+/** Strip generic template benchmarks from all questions on an assessment. */
+export function clearGenericBenchmarks(assessmentId: string): number {
+  let cleared = 0;
+  for (const q of demoStore.questions) {
+    if (q.assessment_id !== assessmentId || q.session_status === 'deleted') continue;
+    if (isGenericBenchmark(q.expected_answer)) {
+      q.expected_answer = null;
+      cleared++;
+    }
+  }
+  return cleared;
+}
+
+/** After AI generation, reject generic filler before persisting. */
+export function finalizeBenchmark(text: string): string {
+  const clean = sanitizeBenchmark(text);
+  return clean || '';
 }
 
 export function formatClientAnswer(

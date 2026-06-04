@@ -20,6 +20,7 @@ export interface Client {
   business_domains: string[];
   website_url: string | null;
   website_details: string | null;
+  country_of_operation: string | null;
 }
 
 export interface Assessment {
@@ -33,6 +34,8 @@ export interface Assessment {
   industry_benchmark_snapshot: Record<string, unknown> | null;
   current_step: number;
   completed_steps: number[];
+  portal_token: string | null;
+  approved_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -380,6 +383,15 @@ export const demoStore = {
   notifications: [] as Notification[],
   auditLogs: [] as AuditLog[],
   chatMessages: [] as ChatMessage[],
+  clientPortalSubmissions: [] as Array<{
+    id: string;
+    assessment_id: string;
+    question_id: string;
+    rating_value: number | null;
+    text_answer: string | null;
+    transcript_answer: string | null;
+    submitted_at: string;
+  }>,
   sessions_auth: new Map<string, { userId: string; email: string }>(),
 
   masters: {
@@ -459,6 +471,7 @@ function seedTestData() {
       business_domains: ['Financial Services', 'B2B SaaS'],
       website_url: 'https://www.acmefinancial.com',
       website_details: 'Regional bank expanding digital lending and fraud detection capabilities.',
+      country_of_operation: 'United States',
     },
     {
       id: CLIENT_IDS.nova,
@@ -471,6 +484,7 @@ function seedTestData() {
       business_domains: ['Healthcare', 'Technology'],
       website_url: 'https://www.novahealth.org',
       website_details: 'Hospital network piloting clinical documentation and patient triage AI.',
+      country_of_operation: 'United States',
     },
     {
       id: CLIENT_IDS.pilot,
@@ -483,6 +497,7 @@ function seedTestData() {
       business_domains: ['Logistics', 'E-commerce'],
       website_url: 'https://www.pilotlogistics.com',
       website_details: 'Mid-size 3PL seeking route optimization and warehouse automation.',
+      country_of_operation: 'United States',
     },
     {
       id: CLIENT_IDS.draft,
@@ -495,8 +510,11 @@ function seedTestData() {
       business_domains: [],
       website_url: null,
       website_details: null,
+      country_of_operation: null,
     },
   );
+
+  const assessmentDefaults = { portal_token: null as string | null, approved_at: null as string | null };
 
   demoStore.assessments.push(
     {
@@ -510,6 +528,7 @@ function seedTestData() {
       industry_benchmark_snapshot: null,
       current_step: 1,
       completed_steps: [],
+      ...assessmentDefaults,
       created_at: now,
       updated_at: now,
     },
@@ -524,6 +543,7 @@ function seedTestData() {
       industry_benchmark_snapshot: { percentage: 35, avg_driver_scores: { business_strategy: 3.2, technology_data: 2.8 } },
       current_step: 3,
       completed_steps: [1, 2],
+      ...assessmentDefaults,
       created_at: now,
       updated_at: now,
     },
@@ -538,6 +558,7 @@ function seedTestData() {
       industry_benchmark_snapshot: { percentage: 40, avg_driver_scores: { business_strategy: 2.5, technology_data: 2.3 } },
       current_step: 5,
       completed_steps: [1, 2, 3, 4],
+      ...assessmentDefaults,
       created_at: now,
       updated_at: now,
     },
@@ -552,6 +573,7 @@ function seedTestData() {
       industry_benchmark_snapshot: null,
       current_step: 5,
       completed_steps: [1, 2, 3, 4],
+      ...assessmentDefaults,
       created_at: now,
       updated_at: now,
     },

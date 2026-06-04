@@ -1,7 +1,13 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { demoStore } from '../lib/demoStore.js';
-import { generateAssessmentQuestions, generateExpectedAnswer, generateResearchNotes } from '../lib/assessmentAi.js';
+import {
+  generateAssessmentQuestions,
+  generateExpectedAnswer,
+  generateResearchNotes,
+  clearGenericBenchmarks,
+} from '../lib/assessmentAi.js';
+import { isGenericBenchmark } from '../lib/benchmarkUtils.js';
 import { isGeminiConfigured } from '../lib/gemini.js';
 import { logAudit } from '../lib/audit.js';
 import { authMiddleware, requireRole } from '../middleware/auth.js';
@@ -84,14 +90,8 @@ router.post('/generate-all', requireRole('super_admin', 'sales_manager'), async 
     const questions = buildQuestionRecords(assessmentId, generated);
     demoStore.questions.push(...questions);
 
-    // 3. Expected (benchmark) answers per question — resilient: a failure leaves it blank
-    for (const q of questions) {
-      try {
-        q.expected_answer = await generateExpectedAnswer(assessmentId, q.id);
-      } catch (err) {
-        console.warn(`Expected answer generation failed for question ${q.id}:`, err);
-      }
-    }
+    // Benchmarks stay empty — manager fills manually or uses "AI Suggest" / "Generate all benchmarks"
+    clearGenericBenchmarks(assessmentId);
 
     if (assessment.status === 'draft') assessment.status = 'pre_assessment';
     assessment.updated_at = new Date().toISOString();
@@ -140,6 +140,34 @@ router.post('/generate-questions', requireRole('super_admin', 'sales_manager'), 
   assessment.updated_at = new Date().toISOString();
   await logAudit(req.user!.id, 'generate_questions', 'assessment', assessmentId, { count: generatedQuestions.length, ai: isGeminiConfigured() });
   res.status(201).json(generatedQuestions);
+});
+
+router.post('/generate-all-benchmarks', requireRole('super_admin', 'sales_manager'), async (req: Request, res: Response) => {
+  const assessmentId = req.params.id as string;
+  const questions = demoStore.questions.filter(
+    (q) => q.assessment_id === assessmentId && q.session_status !== 'deleted',
+  );
+  if (!questions.length) return res.status(400).json({ error: 'Generate questions first' });
+
+  const results: Array<{ id: string; expected_answer: string | null }> = [];
+  for (const q of questions) {
+    try {
+      const expected_answer = await generateExpectedAnswer(assessmentId, q.id);
+      q.expected_answer = expected_answer || null;
+      results.push({ id: q.id, expected_answer: q.expected_answer });
+    } catch (err) {
+      console.warn(`Benchmark failed for ${q.id}:`, err);
+      results.push({ id: q.id, expected_answer: q.expected_answer ?? null });
+    }
+  }
+  await logAudit(req.user!.id, 'generate_all_benchmarks', 'assessment', assessmentId, { count: results.length });
+  res.json({ updated: results.length, questions: results });
+});
+
+router.post('/clear-generic-benchmarks', requireRole('super_admin', 'sales_manager'), async (req: Request, res: Response) => {
+  const assessmentId = req.params.id as string;
+  const cleared = clearGenericBenchmarks(assessmentId);
+  res.json({ cleared });
 });
 
 router.post('/questions/:qid/generate-expected-answer', requireRole('super_admin', 'sales_manager'), async (req: Request, res: Response) => {
@@ -230,7 +258,10 @@ router.put('/questions', requireRole('super_admin', 'sales_manager'), async (req
     if (existing) {
       if (q.question_text !== undefined) existing.question_text = q.question_text;
       if (q.display_order !== undefined) existing.display_order = q.display_order;
-      if (q.expected_answer !== undefined) existing.expected_answer = q.expected_answer;
+      if (q.expected_answer !== undefined) {
+        const val = q.expected_answer?.trim() || null;
+        existing.expected_answer = val && isGenericBenchmark(val) ? null : val;
+      }
     }
   }
   const result = demoStore.questions

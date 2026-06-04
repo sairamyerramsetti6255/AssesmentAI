@@ -4,6 +4,7 @@ import { demoStore } from '../lib/demoStore.js';
 import { openai, isOpenAIConfigured } from '../lib/openai.js';
 import { logAudit } from '../lib/audit.js';
 import { authMiddleware, requireRole } from '../middleware/auth.js';
+import { buildPocLetterHtml, type PocLetterContent } from '../lib/pocLetterHtml.js';
 
 const router = Router({ mergeParams: true });
 router.use(authMiddleware);
@@ -14,10 +15,11 @@ router.post('/', async (req: Request, res: Response) => {
 
   const assessment = demoStore.assessments.find((a) => a.id === assessmentId);
   const client = assessment ? demoStore.clients.find((c) => c.id === assessment.client_id) : null;
+  const industry = demoStore.masters.industries.find((i) => i.id === client?.industry_id);
   const gap = demoStore.gapAnalyses.find((g) => g.assessment_id === assessmentId);
   const topSolution = gap?.recommended_solutions?.[0] || { solution_name: 'GenAI', solution_key: 'genai' };
 
-  const content = {
+  const content: PocLetterContent = {
     title: `PoC Plan: ${topSolution.solution_name} for ${client?.company_name || 'Client'}`,
     objectives: [
       'Validate AI readiness hypothesis with measurable outcomes',
@@ -47,9 +49,19 @@ router.post('/', async (req: Request, res: Response) => {
     } catch { /* use template */ }
   }
 
-  const html = `<h1>${content.title}</h1><h2>Objectives</h2><ul>${content.objectives.map((o: string) => `<li>${o}</li>`).join('')}</ul><h2>Scope</h2><p>${content.scope}</p><h2>Timeline</h2><ul>${content.timeline.map((t: { phase: string; activity: string }) => `<li><strong>${t.phase}:</strong> ${t.activity}</li>`).join('')}</ul>`;
+  const html = buildPocLetterHtml({
+    companyName: client?.company_name || 'Client',
+    industryName: industry?.name,
+    contactName: client?.contact_name,
+    content,
+  });
 
-  const poc = { id: uuidv4(), assessment_id: assessmentId, content, html_content: html };
+  const poc = {
+    id: uuidv4(),
+    assessment_id: assessmentId,
+    content: content as unknown as Record<string, unknown>,
+    html_content: html,
+  };
   const idx = demoStore.pocPlans.findIndex((p) => p.assessment_id === assessmentId);
   if (idx >= 0) demoStore.pocPlans[idx] = poc;
   else demoStore.pocPlans.push(poc);

@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { demoStore, demoPasswords } from '../lib/demoStore.js';
 import { logAudit } from '../lib/audit.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { persistAuthSessions } from '../lib/sessionStore.js';
 
 const router = Router();
 
@@ -18,6 +19,7 @@ router.post('/login', async (req: Request, res: Response) => {
   if (!user) return res.status(401).json({ error: 'Invalid credentials' });
   const token = uuidv4();
   demoStore.sessions_auth.set(token, { userId: user.id, email: user.email });
+  persistAuthSessions(demoStore.sessions_auth);
   await logAudit(user.id, 'login', 'user', user.id);
   res.json({ token, user });
 });
@@ -63,6 +65,7 @@ router.get('/me', authMiddleware, (req: Request, res: Response) => {
 router.post('/logout', authMiddleware, async (req: Request, res: Response) => {
   if (req.token) {
     demoStore.sessions_auth.delete(req.token);
+    persistAuthSessions(demoStore.sessions_auth);
   }
   await logAudit(req.user!.id, 'logout', 'user', req.user!.id);
   res.json({ message: 'Logged out' });

@@ -44,7 +44,7 @@ function renderProposal(assessmentId: string): string {
     .replace(/\{\{solutions_section\}\}/g, solutionsSection)
     .replace(/\{\{poc_section\}\}/g, pocSection);
 
-  return html;
+  return `<div class="proposal-letter-body">${html}</div>`;
 }
 
 router.post('/', async (req: Request, res: Response) => {

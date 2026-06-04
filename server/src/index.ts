@@ -22,8 +22,13 @@ import notificationRoutes from './routes/notifications.js';
 import adminRoutes from './routes/admin.js';
 import auditRoutes from './routes/audit.js';
 import mastersRoutes from './routes/masters.js';
+import portalRoutes from './routes/portal.js';
+import { demoStore } from './lib/demoStore.js';
+import { loadAuthSessions } from './lib/sessionStore.js';
 
 dotenv.config();
+
+demoStore.sessions_auth = loadAuthSessions();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -59,6 +64,7 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.use('/api/masters', mastersRoutes);
+app.use('/api/portal', portalRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/assessments', assessmentRoutes);
@@ -89,8 +95,17 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   res.status(500).json({ error: err.message || 'Internal server error' });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Assessment ai API on http://0.0.0.0:${PORT}`);
   console.log(`CORS: ${allowedOrigins.join(', ')} + *.pbshope.in, *.graylogic.cloud`);
   if (fs.existsSync(indexHtml)) console.log('Serving frontend from /public (same-origin, no CORS)');
+});
+
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use. Stop the other process or set PORT in .env.`);
+    console.error(`Windows: netstat -ano | findstr :${PORT}  then  taskkill /PID <pid> /F`);
+    process.exit(1);
+  }
+  throw err;
 });

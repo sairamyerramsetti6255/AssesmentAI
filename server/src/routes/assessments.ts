@@ -5,6 +5,7 @@ import { logAudit, createNotification } from '../lib/audit.js';
 import { generateResearchNotes } from '../lib/assessmentAi.js';
 import { isGeminiConfigured } from '../lib/gemini.js';
 import { authMiddleware, requireRole } from '../middleware/auth.js';
+import { buildDemoPackage } from '../lib/demoPackage.js';
 
 const router = Router();
 router.use(authMiddleware);
@@ -84,6 +85,7 @@ router.post('/', requireRole('super_admin', 'sales_manager'), async (req: Reques
     business_domains: domains,
     website_url: website_url || null,
     website_details: website_details || null,
+    country_of_operation: (req.body.country_of_operation as string) || null,
   };
   demoStore.clients.push(client);
 
@@ -99,6 +101,8 @@ router.post('/', requireRole('super_admin', 'sales_manager'), async (req: Reques
     industry_benchmark_snapshot: benchmark ? { percentage: benchmark.percentage, avg_driver_scores: benchmark.avg_driver_scores } : null,
     current_step: 1,
     completed_steps: company_name ? [1] : [],
+    portal_token: null,
+    approved_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
@@ -114,7 +118,7 @@ function applyClientFields(
   const client = demoStore.clients.find((c) => c.id === assessment.client_id);
   if (!client) return;
 
-  const clientFields = ['company_name', 'industry_id', 'contact_name', 'contact_email', 'contact_phone', 'domain', 'website_url', 'website_details', 'business_domains'] as const;
+  const clientFields = ['company_name', 'industry_id', 'contact_name', 'contact_email', 'contact_phone', 'domain', 'website_url', 'website_details', 'business_domains', 'country_of_operation'] as const;
   for (const field of clientFields) {
     if (fields[field] !== undefined) {
       Object.assign(client, { [field]: fields[field] });
@@ -169,7 +173,7 @@ router.put('/:id', requireRole('super_admin', 'sales_manager'), async (req: Requ
 
   const client = demoStore.clients.find((c) => c.id === assessment.client_id);
   if (client) {
-    const clientFields = ['company_name', 'industry_id', 'contact_name', 'contact_email', 'contact_phone', 'domain', 'website_url', 'website_details', 'business_domains'] as const;
+    const clientFields = ['company_name', 'industry_id', 'contact_name', 'contact_email', 'contact_phone', 'domain', 'website_url', 'website_details', 'business_domains', 'country_of_operation'] as const;
     for (const field of clientFields) {
       if (updates[field] !== undefined) {
         Object.assign(client, { [field]: updates[field] });
@@ -203,11 +207,49 @@ router.put('/:id', requireRole('super_admin', 'sales_manager'), async (req: Requ
   res.json(enrichAssessment(assessment));
 });
 
+router.post('/:id/approve', requireRole('super_admin', 'sales_manager'), async (req: Request, res: Response) => {
+  const assessment = demoStore.assessments.find((a) => a.id === req.params.id);
+  if (!assessment) return res.status(404).json({ error: 'Not found' });
+
+  const questions = demoStore.questions.filter(
+    (q) => q.assessment_id === assessment.id && q.session_status !== 'deleted',
+  );
+  const missing = questions.filter((q) => q.is_required && !q.expected_answer?.trim());
+  if (questions.length === 0) return res.status(400).json({ error: 'Generate questions before approving' });
+  if (missing.length > 0) {
+    return res.status(400).json({ error: `Set benchmark answers for ${missing.length} required question(s) first` });
+  }
+
+  assessment.status = 'approved';
+  assessment.approved_at = new Date().toISOString();
+  assessment.portal_token = assessment.portal_token || uuidv4();
+  assessment.updated_at = new Date().toISOString();
+  await logAudit(req.user!.id, 'approve_assessment', 'assessment', assessment.id);
+  res.json({
+    ...enrichAssessment(assessment),
+    portal_url: `/client/${assessment.portal_token}`,
+  });
+});
+
+router.post('/:id/demo-package', requireRole('super_admin', 'sales_manager'), async (req: Request, res: Response) => {
+  const assessment = demoStore.assessments.find((a) => a.id === req.params.id);
+  if (!assessment) return res.status(404).json({ error: 'Not found' });
+  if (!['approved', 'assigned', 'in_session', 'scored', 'completed'].includes(assessment.status)) {
+    return res.status(400).json({ error: 'Approve the assessment first (Step 5)' });
+  }
+  const pkg = buildDemoPackage(assessment.id);
+  await logAudit(req.user!.id, 'demo_package', 'assessment', assessment.id);
+  res.json(pkg);
+});
+
 router.post('/:id/assign', requireRole('super_admin', 'sales_manager'), async (req: Request, res: Response) => {
   const { rep_id } = req.body;
 
   const assessment = demoStore.assessments.find((a) => a.id === req.params.id);
   if (!assessment) return res.status(404).json({ error: 'Not found' });
+  if (assessment.status !== 'approved' && assessment.status !== 'assigned') {
+    return res.status(400).json({ error: 'Approve the assessment (Step 5) before assigning to a rep' });
+  }
   assessment.assigned_rep_id = rep_id;
   assessment.status = 'assigned';
   assessment.updated_at = new Date().toISOString();

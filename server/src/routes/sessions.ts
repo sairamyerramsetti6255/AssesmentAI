@@ -13,7 +13,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 router.use(authMiddleware);
 
-router.post('/', requireRole('super_admin', 'sales_rep'), async (req: Request, res: Response) => {
+router.post('/', requireRole('sales_rep'), async (req: Request, res: Response) => {
   const { assessment_id } = req.body;
 
   const assessment = demoStore.assessments.find((a) => a.id === assessment_id);
@@ -45,7 +45,11 @@ router.get('/:id', async (req: Request, res: Response) => {
 
   const questions = demoStore.questions
     .filter((q) => q.assessment_id === session.assessment_id && q.session_status !== 'deleted')
-    .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0));
+    .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0))
+    .map((q) => {
+      const { expected_answer: _bench, ...rest } = q;
+      return rest;
+    });
 
   const answers = demoStore.answers.filter((a) => a.session_id === session.id);
   const ctx = getAssessmentContext(session.assessment_id);
