@@ -63,6 +63,25 @@ app.options('*', cors({
 }));
 app.use(express.json({ limit: '50mb' }));
 
+/** Quick check that Node API is live (static-only hosts return 404 here). */
+app.get('/api', (_req, res) => {
+  res.json({
+    ok: true,
+    message: 'Assessment API',
+    prototype_ai: [
+      'GET /api/health/openrouter',
+      'POST /api/research/pipeline',
+      'POST /api/research/scrape',
+      'POST /api/assessment/generate-questions',
+      'POST /api/assessment/rewrite-question',
+      'POST /api/assessment/generate-demo-answers',
+      'POST /api/assessment/generate-proposal',
+      'POST /api/chat/completions',
+      'POST /api/chat/completions/stream',
+    ],
+  });
+});
+
 app.get('/api/health', (_req, res) => {
   const or = getOpenRouterConfigFromEnv();
   res.json({

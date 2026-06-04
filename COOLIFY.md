@@ -2,15 +2,18 @@
 
 ## You have two choices
 
-### Option A — One app (recommended, fixes CORS)
+### Option A — One app (required for `assessment.pbshope.in`)
 
 Serve **prototype UI + API on the same domain**. The root `Dockerfile` builds **prototype** (not `client`) and serves it from `/public`. All AI calls use **OpenRouter** on the Node server (`/api/research/*`, `/api/assessment/*`, `/api/chat/completions`).
 
+**If `/api/health` or `/api/research/pipeline` returns 404:** the site is **static-only** (uploaded `dist` without Node). Change the Coolify app to **Docker Application** and redeploy — do not use a static site build for this domain.
+
 | Setting | Value |
 |---------|--------|
-| **Base Directory** | `.` (repo root, empty = root) |
-| **Dockerfile** | `Dockerfile` (in repo root) |
+| **Base Directory** | `.` (repo root) |
+| **Dockerfile** | `Dockerfile` (repo root) **or** `server/Dockerfile` (same stack; build context must be repo root) |
 | **Port** | `3001` |
+| **Health check** | `/api/health` (must return JSON, not 404) |
 
 **Env:**
 
@@ -24,7 +27,15 @@ CLIENT_URL=https://assessment.pbshope.in
 SERVE_CLIENT=true
 ```
 
-Open `https://YOUR-API-DOMAIN/` in the browser (not graylogic unless you point DNS there).
+Open `https://assessment.pbshope.in/` in the browser.
+
+**Verify after deploy:**
+
+| URL | Expected |
+|-----|----------|
+| `https://assessment.pbshope.in/api/health` | JSON with `"status":"ok"` and `"openrouter":true` |
+| `https://assessment.pbshope.in/api` | JSON listing `POST /api/research/pipeline` |
+| Login page works but AI 404 | Still static-only — switch app to Docker (Option A) |
 
 ---
 
