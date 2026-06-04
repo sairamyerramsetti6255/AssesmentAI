@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { demoStore } from '../lib/demoStore.js';
-import { generateAssessmentQuestions, generateExpectedAnswer } from '../lib/assessmentAi.js';
+import { generateAssessmentQuestions, generateExpectedAnswer, generateResearchNotes } from '../lib/assessmentAi.js';
 import { isGeminiConfigured } from '../lib/gemini.js';
 import { logAudit } from '../lib/audit.js';
 import { authMiddleware, requireRole } from '../middleware/auth.js';
@@ -9,36 +9,12 @@ import { authMiddleware, requireRole } from '../middleware/auth.js';
 const router = Router({ mergeParams: true });
 router.use(authMiddleware);
 
-router.get('/questions', async (req: Request, res: Response) => {
-  const assessmentId = req.params.id as string;
-
-  res.json(
-    demoStore.questions
-      .filter((q) => q.assessment_id === assessmentId && q.session_status !== 'deleted')
-      .sort((a, b) => (a.display_order || 0) - (b.display_order || 0))
-  );
-});
-
-router.post('/generate-questions', requireRole('super_admin', 'sales_manager'), async (req: Request, res: Response) => {
-  const assessmentId = req.params.id as string;
-
-  const assessment = demoStore.assessments.find((a) => a.id === assessmentId);
-  if (!assessment) return res.status(404).json({ error: 'Not found' });
-
-  demoStore.questions = demoStore.questions.filter((q) => q.assessment_id !== assessmentId);
-
-  let generated: Awaited<ReturnType<typeof generateAssessmentQuestions>>;
-  try {
-    generated = await generateAssessmentQuestions(assessmentId);
-  } catch (err) {
-    console.error('Question generation failed:', err);
-    if (!isGeminiConfigured()) {
-      return res.status(503).json({ error: 'Gemini API key not configured' });
-    }
-    return res.status(502).json({ error: err instanceof Error ? err.message : 'Failed to generate questions' });
-  }
-
-  const generatedQuestions: typeof demoStore.questions = generated.map((q, idx) => {
+/** Map AI-generated question payloads into persisted demoStore question records. */
+function buildQuestionRecords(
+  assessmentId: string,
+  generated: Awaited<ReturnType<typeof generateAssessmentQuestions>>,
+): typeof demoStore.questions {
+  return generated.map((q, idx) => {
     const driver = demoStore.masters.drivers.find((d) => d.driver_key === q.driver_key) || demoStore.masters.drivers[idx % demoStore.masters.drivers.length];
     const questionType = q.question_type || 'rating';
     return {
@@ -62,6 +38,102 @@ router.post('/generate-questions', requireRole('super_admin', 'sales_manager'), 
       expected_answer: null,
     };
   });
+}
+
+/** Map suggested pain-point category names to their master IDs. */
+function resolvePainPointIds(names: string[]): string[] {
+  return names
+    .map((name) => demoStore.masters.painPoints.find((p) => p.category_name.toLowerCase() === name.toLowerCase())?.id)
+    .filter((id): id is string => Boolean(id));
+}
+
+router.get('/questions', async (req: Request, res: Response) => {
+  const assessmentId = req.params.id as string;
+
+  res.json(
+    demoStore.questions
+      .filter((q) => q.assessment_id === assessmentId && q.session_status !== 'deleted')
+      .sort((a, b) => (a.display_order || 0) - (b.display_order || 0))
+  );
+});
+
+/**
+ * One-shot generation driven entirely by Step 1 client info:
+ * deep research -> questions -> expected answers, persisted in a single request.
+ */
+router.post('/generate-all', requireRole('super_admin', 'sales_manager'), async (req: Request, res: Response) => {
+  const assessmentId = req.params.id as string;
+
+  const assessment = demoStore.assessments.find((a) => a.id === assessmentId);
+  if (!assessment) return res.status(404).json({ error: 'Not found' });
+
+  const client = demoStore.clients.find((c) => c.id === assessment.client_id);
+  if (!client?.company_name?.trim()) {
+    return res.status(400).json({ error: 'Enter the company name in Step 1 before generating' });
+  }
+
+  try {
+    // 1. Deep research from client info
+    const research = await generateResearchNotes(assessmentId);
+    assessment.pre_assessment_notes = research.research_notes;
+    assessment.pain_point_ids = resolvePainPointIds(research.suggested_pain_points);
+
+    // 2. Tailored questions
+    demoStore.questions = demoStore.questions.filter((q) => q.assessment_id !== assessmentId);
+    const generated = await generateAssessmentQuestions(assessmentId);
+    const questions = buildQuestionRecords(assessmentId, generated);
+    demoStore.questions.push(...questions);
+
+    // 3. Expected (benchmark) answers per question — resilient: a failure leaves it blank
+    for (const q of questions) {
+      try {
+        q.expected_answer = await generateExpectedAnswer(assessmentId, q.id);
+      } catch (err) {
+        console.warn(`Expected answer generation failed for question ${q.id}:`, err);
+      }
+    }
+
+    if (assessment.status === 'draft') assessment.status = 'pre_assessment';
+    assessment.updated_at = new Date().toISOString();
+    await logAudit(req.user!.id, 'generate_all', 'assessment', assessmentId, {
+      questions: questions.length,
+      ai: isGeminiConfigured(),
+    });
+
+    res.status(201).json({
+      research_notes: research.research_notes,
+      pain_point_ids: assessment.pain_point_ids,
+      questions,
+    });
+  } catch (err) {
+    console.error('Full generation failed:', err);
+    const msg = err instanceof Error ? err.message : 'Generation failed';
+    if (msg.includes('Complete Step 1') || msg.includes('company name')) return res.status(400).json({ error: msg });
+    if (!isGeminiConfigured()) return res.status(503).json({ error: 'Gemini API key not configured' });
+    return res.status(502).json({ error: msg });
+  }
+});
+
+router.post('/generate-questions', requireRole('super_admin', 'sales_manager'), async (req: Request, res: Response) => {
+  const assessmentId = req.params.id as string;
+
+  const assessment = demoStore.assessments.find((a) => a.id === assessmentId);
+  if (!assessment) return res.status(404).json({ error: 'Not found' });
+
+  demoStore.questions = demoStore.questions.filter((q) => q.assessment_id !== assessmentId);
+
+  let generated: Awaited<ReturnType<typeof generateAssessmentQuestions>>;
+  try {
+    generated = await generateAssessmentQuestions(assessmentId);
+  } catch (err) {
+    console.error('Question generation failed:', err);
+    if (!isGeminiConfigured()) {
+      return res.status(503).json({ error: 'Gemini API key not configured' });
+    }
+    return res.status(502).json({ error: err instanceof Error ? err.message : 'Failed to generate questions' });
+  }
+
+  const generatedQuestions = buildQuestionRecords(assessmentId, generated);
 
   demoStore.questions.push(...generatedQuestions);
   assessment.status = assessment.status === 'draft' ? 'pre_assessment' : assessment.status;
