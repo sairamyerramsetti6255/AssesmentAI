@@ -1,5 +1,5 @@
 # Build from REPO ROOT (Coolify: Base Directory = ".", Dockerfile = "server/Dockerfile")
-# Serves prototype SPA + /api/* on port 3001. Do NOT deploy prototype/dist as static-only.
+# Serves prototype SPA + /api/* on PORT (default 80 for Coolify). Do NOT deploy prototype/dist as static-only.
 
 FROM node:22-alpine AS client-build
 WORKDIR /app/prototype
@@ -24,5 +24,6 @@ COPY server/package.json server/package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=server-build /app/server/dist ./dist
 COPY --from=client-build /app/prototype/dist ./public
-EXPOSE 3001
+ENV PORT=80
+EXPOSE 80
 CMD ["node", "dist/index.js"]

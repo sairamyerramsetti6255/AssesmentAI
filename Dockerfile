@@ -26,5 +26,7 @@ COPY server/package.json server/package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=server-build /app/server/dist ./dist
 COPY --from=client-build /app/prototype/dist ./public
-EXPOSE 3001
+# Coolify defaults to ports_exposes: 80 — must match PORT (do not set PORT=3001 unless you change Coolify port too)
+ENV PORT=80
+EXPOSE 80
 CMD ["node", "dist/index.js"]

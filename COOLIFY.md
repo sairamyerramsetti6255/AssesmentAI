@@ -12,13 +12,23 @@ Serve **prototype UI + API on the same domain**. The root `Dockerfile` builds **
 |---------|--------|
 | **Base Directory** | `.` (repo root) |
 | **Dockerfile** | `Dockerfile` (repo root) **or** `server/Dockerfile` (same stack; build context must be repo root) |
-| **Port** | `3001` |
+| **Ports Exposes** (General page) | `80` |
 | **Health check** | `/api/health` (must return JSON, not 404) |
+
+### Port mismatch (fixes 404 / bad gateway)
+
+Coolify shows: `PORT (3001) does not match ports_exposes: 80`
+
+| Wrong | Right |
+|-------|------|
+| `PORT=3001` in env + Ports Exposes `80` | **Remove `PORT` from env** (image uses `80`) **or** set `PORT=80` |
+| Ports Exposes `3001` + `PORT=3001` | Only if you change **both** — default is **80** |
+
+If they do not match, Traefik hits port 80 while Node listens on 3001 → login page may work from cache/static but **`/api/*` returns 404 or 502**.
 
 **Env:**
 
 ```
-PORT=3001
 OPENROUTER_API_KEY=your-openrouter-key
 OPENROUTER_MODEL=nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
 OPENROUTER_SITE_URL=https://assessment.pbshope.in
@@ -44,7 +54,6 @@ Open `https://assessment.pbshope.in/` in the browser.
 **API app** — Base Directory: `server`
 
 ```
-PORT=3001
 GEMINI_API_KEY=your-key
 CLIENT_URL=https://assessment.pbshope.in
 ```
@@ -94,7 +103,6 @@ Rebuild frontend after changing it.
 
 ```
 CLIENT_URL=https://assessment.pbshope.in
-PORT=3001
 ```
 
 ### 4. Other checks

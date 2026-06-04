@@ -132,7 +132,7 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 });
 
 const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Assessment ai API on http://0.0.0.0:${PORT}`);
+  console.log(`Assessment ai API on http://0.0.0.0:${PORT} (Coolify Ports Exposes must match)`);
   console.log(`CORS: ${allowedOrigins.join(', ')} + *.pbshope.in, *.graylogic.cloud`);
   if (fs.existsSync(indexHtml)) console.log('Serving frontend from /public (same-origin, no CORS)');
 });
