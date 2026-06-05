@@ -24,6 +24,7 @@ import auditRoutes from './routes/audit.js';
 import mastersRoutes from './routes/masters.js';
 import portalRoutes from './routes/portal.js';
 import prototypeAiRoutes from './routes/prototypeAi.js';
+import prototypeDataRoutes from './routes/prototypeData.js';
 import { demoStore } from './lib/demoStore.js';
 import { getOpenRouterConfigFromEnv } from './lib/openrouter/openrouterClient.js';
 import { loadAuthSessions } from './lib/sessionStore.js';
@@ -98,6 +99,9 @@ app.get('/api/health', (_req, res) => {
 
 /** Prototype UI — OpenRouter AI routes only (same-origin /api/*). */
 app.use('/api', prototypeAiRoutes);
+
+/** Prototype UI — Supabase data routes */
+app.use('/api/proto', prototypeDataRoutes);
 
 app.use('/api/masters', mastersRoutes);
 app.use('/api/portal', portalRoutes);
