@@ -17,6 +17,8 @@ export function createOpenRouterClient(config: OpenRouterConfig) {
   return new OpenAI({
     baseURL: 'https://openrouter.ai/api/v1',
     apiKey: config.apiKey,
+    timeout: 120_000,
+    maxRetries: 1,
     defaultHeaders: Object.keys(defaultHeaders).length ? defaultHeaders : undefined,
   });
 }

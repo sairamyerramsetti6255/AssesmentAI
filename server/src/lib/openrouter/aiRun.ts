@@ -28,13 +28,14 @@ async function complete(
   config: OpenRouterConfig,
   system: string,
   user: string,
+  options?: { reasoning?: boolean },
 ): Promise<string> {
   const res = await handleChatCompletion(client, config, {
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
-    reasoning: true,
+    reasoning: options?.reasoning ?? false,
   })
   return res.content ?? ''
 }
@@ -45,6 +46,13 @@ export async function runResearchPipeline(
   lead: LeadPayload,
 ): Promise<ResearchResult> {
   const scrape = await scrapeWebsite(lead.domain)
+
+  const docUser = `Company: ${lead.companyName}
+Uploaded document filenames (metadata only): ${lead.documents.length ? lead.documents.join(', ') : 'none'}
+
+Return JSON only:
+{"documentInsights":["..."]}
+Infer likely discovery themes from filenames (3-5 bullets).`
 
   const webUser = `Company: ${lead.companyName}
 Industry: ${lead.industry}
@@ -59,12 +67,20 @@ Return JSON only:
 {"webInsights":["..."],"competitors":["..."]}
 Provide 4-6 webInsights bullets and 3-5 competitor names/programs relevant to AI readiness in this vertical.`
 
-  const webRaw = await complete(
-    client,
-    config,
-    'You analyze company websites for B2B AI discovery. Respond with valid JSON only, no markdown.',
-    webUser,
-  )
+  const [webRaw, docRaw] = await Promise.all([
+    complete(
+      client,
+      config,
+      'You analyze company websites for B2B AI discovery. Respond with valid JSON only, no markdown.',
+      webUser,
+    ),
+    complete(
+      client,
+      config,
+      'You infer document discovery themes from filenames for enterprise AI assessments. JSON only.',
+      docUser,
+    ),
+  ])
   let webInsights: string[] = []
   let competitors: string[] = []
   try {
@@ -74,20 +90,6 @@ Provide 4-6 webInsights bullets and 3-5 competitor names/programs relevant to AI
   } catch {
     webInsights = [webRaw.slice(0, 500)]
   }
-
-  const docUser = `Company: ${lead.companyName}
-Uploaded document filenames (metadata only): ${lead.documents.length ? lead.documents.join(', ') : 'none'}
-
-Return JSON only:
-{"documentInsights":["..."]}
-Infer likely discovery themes from filenames (3-5 bullets).`
-
-  const docRaw = await complete(
-    client,
-    config,
-    'You infer document discovery themes from filenames for enterprise AI assessments. JSON only.',
-    docUser,
-  )
   let documentInsights: string[] = []
   try {
     const parsed = parseJsonFromLlm<{ documentInsights: string[] }>(docRaw)

@@ -125,7 +125,7 @@ export function LeadIntake() {
       setAiError(
         e instanceof OpenRouterApiError
           ? e.message
-          : 'AI pipeline failed. Check OPENROUTER_API_KEY in .env (no quotes) and restart npm run dev.',
+          : 'AI pipeline failed. Wait 1–2 minutes and retry, or check OPENROUTER_API_KEY on the API server.',
       )
       setAgents((a) => a.map((x) => (x.status === 'running' ? { ...x, status: 'error' } : x)))
     } finally {
@@ -249,6 +249,12 @@ export function LeadIntake() {
                       ? 'Re-run AI research'
                       : 'Run scrape + research + AI brief'}
                 </Button>
+                {aiLoading && (
+                  <p className="text-center text-xs text-slate-500">
+                    Free AI model can take 30–90 seconds. Keep this tab open — &quot;Provisional headers&quot; in
+                    DevTools is normal while waiting.
+                  </p>
+                )}
                 {selectedLead.researchProgress >= 100 && (
                   <Button variant="secondary" className="w-full" onClick={() => navigate('/review')}>
                     Open Review Workspace →

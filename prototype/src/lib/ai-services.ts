@@ -36,12 +36,24 @@ export interface ProposalAiResult {
   }
 }
 
+const AI_FETCH_TIMEOUT_MS = 300_000
+
 async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(resolveApiUrl(path), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), AI_FETCH_TIMEOUT_MS)
+  let res: Response
+  try {
+    res = await fetch(resolveApiUrl(path), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+  } catch (err) {
+    wrapFetchError(err)
+  } finally {
+    clearTimeout(timer)
+  }
   if (!res.ok) {
     let msg = res.statusText
     try {
@@ -53,6 +65,16 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     throw new OpenRouterApiError(msg, res.status)
   }
   return res.json() as Promise<T>
+}
+
+function wrapFetchError(err: unknown): never {
+  if (err instanceof DOMException && err.name === 'AbortError') {
+    throw new OpenRouterApiError(
+      'AI request timed out after 5 minutes. The free model may be busy — try again in a moment.',
+      408,
+    )
+  }
+  throw err
 }
 
 export function leadToPayload(lead: Lead) {
