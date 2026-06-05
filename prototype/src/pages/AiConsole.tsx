@@ -64,7 +64,9 @@ export function AiConsole() {
         <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
           {error}
           {!error.includes('OPENROUTER') && (
-            <p className="mt-1 text-xs">Ensure OPENROUTER_API_KEY is set in prototype/.env and restart npm run dev.</p>
+            <p className="mt-1 text-xs">
+              Check OPENROUTER_API_KEY on the API server (Coolify env) and that the frontend can reach the API subdomain.
+            </p>
           )}
         </div>
       )}
