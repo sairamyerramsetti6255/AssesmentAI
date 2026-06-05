@@ -1,4 +1,5 @@
 import { OPENROUTER_FREE_MODEL } from '../../shared/openrouter-model'
+import { resolveApiUrl } from './apiBase'
 import type { ChatCompletionResponse, ChatRequestBody, ORChatMessage } from './openrouter-types'
 
 export { OPENROUTER_FREE_MODEL }
@@ -33,7 +34,7 @@ function withDefaultModel(body: ChatRequestBody): ChatRequestBody {
 export async function chatCompletion(
   body: ChatRequestBody,
 ): Promise<ChatCompletionResponse> {
-  const res = await fetch('/api/chat/completions', {
+  const res = await fetch(resolveApiUrl('/api/chat/completions'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(withDefaultModel(body)),
@@ -48,7 +49,7 @@ export async function chatCompletionStream(
   onToken: (text: string) => void,
   options?: { reasoning?: boolean },
 ): Promise<void> {
-  const res = await fetch('/api/chat/completions/stream', {
+  const res = await fetch(resolveApiUrl('/api/chat/completions/stream'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(

@@ -2,6 +2,7 @@ import type { AssessmentQuestion, AssessmentTaxonomy, Lead } from '../types'
 import { pillarToCategory } from './questions'
 import { normalizeQuestion } from './question-types'
 import type { TaxonomyPillar } from '../types'
+import { resolveApiUrl } from './apiBase'
 import { OpenRouterApiError } from './openrouter'
 
 export interface ResearchResult {
@@ -36,7 +37,7 @@ export interface ProposalAiResult {
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetch(resolveApiUrl(path), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -96,7 +97,7 @@ export async function checkOpenRouterHealth(): Promise<{
   model?: string
   keyConfigured?: boolean
 }> {
-  const res = await fetch('/api/health/openrouter')
+  const res = await fetch(resolveApiUrl('/api/health/openrouter'))
   if (!res.ok) return { ok: false }
   return res.json() as Promise<{ ok: boolean; model?: string; keyConfigured?: boolean }>
 }
