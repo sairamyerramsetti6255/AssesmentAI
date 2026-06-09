@@ -18,10 +18,11 @@ export function Login() {
     return <Navigate to={from} replace />
   }
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
-    if (!login(email, password)) {
+    const ok = await login(email, password)
+    if (!ok) {
       setError('Invalid email or password.')
       return
     }

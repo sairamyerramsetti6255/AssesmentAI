@@ -2,6 +2,7 @@ import type { AssessmentQuestion, AssessmentTaxonomy, Lead } from '../types'
 import { pillarToCategory } from './questions'
 import { normalizeQuestion } from './question-types'
 import type { TaxonomyPillar } from '../types'
+import { documentNames } from './documents'
 import { resolveApiUrl } from './apiBase'
 import { OpenRouterApiError } from './openrouter'
 
@@ -83,7 +84,7 @@ export function leadToPayload(lead: Lead) {
     industry: lead.industry,
     domain: lead.domain,
     country: lead.country,
-    documents: lead.documents,
+    documents: documentNames(lead.documents),
   }
 }
 

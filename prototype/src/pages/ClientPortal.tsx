@@ -5,6 +5,10 @@ import { ClientPortalThankYou } from '../components/ClientPortalThankYou'
 import { QuestionAnswerInput, type AnswerState } from '../components/QuestionAnswerInput'
 import { getClientTestData } from '../data/testData'
 import { sortQuestions } from '../lib/questions'
+import { UploadedDocumentsTable } from '../components/UploadedDocumentsTable'
+import * as api from '../lib/api'
+import { documentFromFile } from '../lib/documents'
+import type { LeadDocument } from '../types'
 import { Badge, Button, ProgressBar } from '../components/ui'
 
 function countAnswered(
@@ -41,7 +45,8 @@ export function ClientPortal() {
   const [answers, setAnswers] = useState<Record<string, string | number | string[]>>({})
   const [otherText, setOtherText] = useState<Record<string, string>>({})
   const [richtext, setRichtext] = useState<Record<string, string>>({})
-  const [uploadedFiles, setUploadedFiles] = useState<string[]>([])
+  const [uploadedFiles, setUploadedFiles] = useState<LeadDocument[]>([])
+  const [uploading, setUploading] = useState(false)
   const [saved, setSaved] = useState(false)
 
   const answerState: AnswerState = { answers, otherText, richtext }
@@ -57,7 +62,7 @@ export function ClientPortal() {
       setAnswers({ ...lead.clientAnswers })
       setRichtext({ ...(lead.clientRichtext ?? {}) })
       setOtherText({ ...(lead.clientOtherText ?? {}) })
-      setUploadedFiles([...(lead.clientUploadedDocuments ?? [])])
+      setUploadedFiles([...(lead.clientUploadedDocuments ?? [])] as LeadDocument[])
     } else {
       const data = getClientTestData(token, lead?.id, questions)
       setAnswers({ ...data.answers })
@@ -104,10 +109,35 @@ export function ClientPortal() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
+  const uploadFiles = async (list: FileList | File[]) => {
+    if (!lead) return
+    setUploading(true)
+    try {
+      for (const file of Array.from(list)) {
+        const meta = documentFromFile(file, 'client')
+        const res = await api.uploadLeadDocument(lead.id, file, meta)
+        const row = res.document
+        setUploadedFiles((prev) => [
+          ...prev,
+          {
+            id: String(row.id),
+            name: String(row.name),
+            matchStatus: (row.match_status as LeadDocument['matchStatus']) ?? 'unmatched',
+            transactionDate: String(row.transaction_date ?? meta.transactionDate),
+            uploadedAt: String(row.uploaded_at ?? meta.uploadedAt),
+            source: 'client',
+            hasFile: true,
+          },
+        ])
+      }
+    } finally {
+      setUploading(false)
+    }
+  }
+
   const onFileDrop = (e: React.DragEvent) => {
     e.preventDefault()
-    const names = Array.from(e.dataTransfer.files).map((f) => f.name)
-    setUploadedFiles((prev) => [...prev, ...names])
+    void uploadFiles(e.dataTransfer.files)
   }
 
   if (submitted) {
@@ -217,30 +247,23 @@ export function ClientPortal() {
                     className="hidden"
                     accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
                     onChange={(e) => {
-                      const names = Array.from(e.target.files ?? []).map((f) => f.name)
-                      setUploadedFiles((prev) => [...prev, ...names])
+                      if (e.target.files) void uploadFiles(e.target.files)
+                      e.target.value = ''
                     }}
                   />
                 </label>
               </div>
+              {uploading && (
+                <p className="mt-4 text-sm text-indigo-600">Uploading documents…</p>
+              )}
               {uploadedFiles.length > 0 && (
-                <ul className="mt-4 space-y-1 text-sm text-slate-700">
-                  {uploadedFiles.map((f) => (
-                    <li
-                      key={f}
-                      className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"
-                    >
-                      <span>📄 {f}</span>
-                      <button
-                        type="button"
-                        className="text-xs text-rose-600 hover:text-rose-700"
-                        onClick={() => setUploadedFiles((prev) => prev.filter((x) => x !== f))}
-                      >
-                        Remove
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                <div className="mt-4">
+                  <UploadedDocumentsTable
+                    leadId={lead?.id}
+                    portalToken={token}
+                    documents={uploadedFiles}
+                  />
+                </div>
               )}
             </div>
           </>

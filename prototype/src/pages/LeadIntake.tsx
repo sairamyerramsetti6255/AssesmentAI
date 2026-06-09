@@ -8,8 +8,10 @@ import {
 import { generateAssessmentQuestions, runResearchPipeline } from '../lib/ai-services'
 import { mergeMandatoryQuestions } from '../lib/questions'
 import { OpenRouterApiError } from '../lib/openrouter'
+import { UploadedDocumentsTable } from '../components/UploadedDocumentsTable'
 import { IndustryVerticalField } from '../components/IndustryVerticalField'
 import { resolveIndustryVertical } from '../data/industry-verticals'
+import { documentFromFile, normalizeDocuments } from '../lib/documents'
 import { Badge, Button, Card, Input, PageHeader, ProgressBar, Select } from '../components/ui'
 
 type AgentStep = 'Document Extractor' | 'Web Scraping' | 'Competitive Intelligence' | 'Executive Brief'
@@ -36,7 +38,7 @@ export function LeadIntake() {
     domain: '',
     country: '',
   })
-  const [files, setFiles] = useState<string[]>([])
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [agents, setAgents] = useState<{ name: AgentStep; status: string }[]>([])
   const [sampleIndex, setSampleIndex] = useState(0)
   const [aiLoading, setAiLoading] = useState(false)
@@ -52,20 +54,25 @@ export function LeadIntake() {
       domain: sample.domain,
       country: sample.country,
     })
-    setFiles([...sample.documents])
+    setPendingFiles(
+      sample.documents.map(
+        (name) => new File([`Sample content for ${name}`], name, { type: 'text/plain' }),
+      ),
+    )
     setSampleIndex((index + 1) % leadIntakeFormSamples.length)
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     const industry = resolveIndustryVertical(form.industry, form.industryOther)
-    addLead({
+    await addLead({
       companyName: form.companyName,
       industry,
       domain: form.domain,
       country: form.country,
       assignedExecutive: currentUser?.name ?? 'Unassigned',
-      documents: files,
+      pendingFiles,
+      documentRecords: pendingFiles.map((f) => documentFromFile(f, 'intake')),
     })
     setForm({
       companyName: '',
@@ -74,14 +81,19 @@ export function LeadIntake() {
       domain: '',
       country: '',
     })
-    setFiles([])
+    setPendingFiles([])
+  }
+
+  const addDroppedFiles = (list: FileList | File[]) => {
+    setPendingFiles((prev) => [...prev, ...Array.from(list)])
   }
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
-    const names = Array.from(e.dataTransfer.files).map((f) => f.name)
-    setFiles((prev) => [...prev, ...names])
+    addDroppedFiles(e.dataTransfer.files)
   }
+
+  const pendingPreview = pendingFiles.map((f) => documentFromFile(f, 'intake'))
 
   const setAgentStatus = (name: AgentStep, status: string) => {
     setAgents((prev) => {
@@ -185,20 +197,40 @@ export function LeadIntake() {
             >
               <p className="text-sm font-medium text-slate-700">Document ingestion port</p>
               <p className="mt-1 text-xs text-slate-500">Drag PDF or DOCX (filenames used for AI context)</p>
+              <label className="mt-3 inline-block cursor-pointer rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-indigo-600 ring-1 ring-indigo-200 hover:bg-indigo-50">
+                Choose files
+                <input
+                  type="file"
+                  multiple
+                  className="hidden"
+                  accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.xls,.xlsx,.csv"
+                  onChange={(e) => {
+                    if (e.target.files) addDroppedFiles(e.target.files)
+                    e.target.value = ''
+                  }}
+                />
+              </label>
               <Button
                 type="button"
                 variant="ghost"
                 className="mt-2 !text-xs"
-                onClick={() => setFiles([...defaultLeadIntakeForm.documents])}
+                onClick={() =>
+                  setPendingFiles(
+                    normalizeDocuments(defaultLeadIntakeForm.documents, 'intake').map(
+                      (d) => new File([`Sample: ${d.name}`], d.name, { type: 'text/plain' }),
+                    ),
+                  )
+                }
               >
                 Add sample documents
               </Button>
-              {files.length > 0 && (
-                <ul className="mt-3 space-y-1 text-left text-xs text-slate-600">
-                  {files.map((f) => (
-                    <li key={f}>📄 {f}</li>
-                  ))}
-                </ul>
+              {pendingPreview.length > 0 && (
+                <div className="mt-4 text-left">
+                  <UploadedDocumentsTable
+                    documents={pendingPreview}
+                    emptyMessage=""
+                  />
+                </div>
               )}
             </div>
             <div className="flex gap-2">
@@ -294,6 +326,14 @@ export function LeadIntake() {
               </ul>
             )}
           </Card>
+          {selectedLead && selectedLead.documents.length > 0 && (
+            <Card title="Uploaded documents">
+              <UploadedDocumentsTable
+                leadId={selectedLead.id}
+                documents={selectedLead.documents}
+              />
+            </Card>
+          )}
           {research && (
             <Card title="AI research output">
               <div className="space-y-3 text-xs text-slate-600">

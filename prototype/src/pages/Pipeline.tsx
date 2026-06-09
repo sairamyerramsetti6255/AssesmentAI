@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext'
 import { funnelStages } from '../data/mock'
 import { pipelineRemarkSamples } from '../data/testData'
 import type { FunnelStatus, Lead } from '../types'
+import { UploadedDocumentsTable } from '../components/UploadedDocumentsTable'
 import { ExecutiveAssessmentTools } from '../components/ExecutiveAssessmentTools'
 import { Badge, Button, Card, Input, PageHeader, Select } from '../components/ui'
 
@@ -78,10 +79,26 @@ export function Pipeline() {
                 <dt className="text-xs text-slate-500">Created</dt>
                 <dd className="font-medium">{selectedLead.createdAt}</dd>
               </div>
-              <div>
-                <dt className="text-xs text-slate-500">Documents</dt>
-                <dd>{selectedLead.documents.join(', ') || '—'}</dd>
+              <div className="col-span-2">
+                <dt className="mb-2 text-xs text-slate-500">Uploaded documents</dt>
+                <dd>
+                  <UploadedDocumentsTable
+                    leadId={selectedLead.id}
+                    documents={selectedLead.documents}
+                  />
+                </dd>
               </div>
+              {selectedLead.clientUploadedDocuments && selectedLead.clientUploadedDocuments.length > 0 && (
+                <div className="col-span-2">
+                  <dt className="mb-2 text-xs text-slate-500">Client portal uploads</dt>
+                  <dd>
+                    <UploadedDocumentsTable
+                      leadId={selectedLead.id}
+                      documents={selectedLead.clientUploadedDocuments}
+                    />
+                  </dd>
+                </div>
+              )}
               <div>
                 <dt className="text-xs text-slate-500">Assessment</dt>
                 <dd>

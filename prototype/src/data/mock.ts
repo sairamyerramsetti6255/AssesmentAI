@@ -1,3 +1,4 @@
+import { normalizeDocuments } from '../lib/documents'
 import type {
   AssessmentQuestion,
   DriverHeatmap,
@@ -57,7 +58,7 @@ export const initialLeads: Lead[] = [
     funnelStatus: 'review',
     createdAt: '2026-05-28',
     lastInteraction: '2026-06-04',
-    documents: ['architecture-overview.pdf', 'discovery-notes.docx'],
+    documents: normalizeDocuments(['architecture-overview.pdf', 'discovery-notes.docx'], 'intake'),
     researchProgress: 100,
     assessmentStatus: 'draft',
     remarks: [
@@ -77,7 +78,7 @@ export const initialLeads: Lead[] = [
     funnelStatus: 'client_portal',
     createdAt: '2026-05-20',
     lastInteraction: '2026-06-03',
-    documents: ['data-governance-framework.pdf'],
+    documents: normalizeDocuments(['data-governance-framework.pdf'], 'intake'),
     researchProgress: 100,
     assessmentStatus: 'approved',
     portalToken: 'prt-demo-8f3a',
@@ -99,7 +100,7 @@ export const initialLeads: Lead[] = [
     funnelStatus: 'intake',
     createdAt: '2026-06-02',
     lastInteraction: '2026-06-02',
-    documents: [],
+    documents: normalizeDocuments([], 'intake'),
     researchProgress: 0,
     assessmentStatus: 'draft',
     remarks: [],
@@ -114,7 +115,7 @@ export const initialLeads: Lead[] = [
     funnelStatus: 'proposal',
     createdAt: '2026-04-15',
     lastInteraction: '2026-06-01',
-    documents: ['risk-assessment.pdf', 'legacy-core-diagram.pdf'],
+    documents: normalizeDocuments(['risk-assessment.pdf', 'legacy-core-diagram.pdf'], 'intake'),
     researchProgress: 100,
     assessmentStatus: 'approved',
     portalToken: 'sfs-demo-2c91',
@@ -136,11 +137,14 @@ export const initialLeads: Lead[] = [
     funnelStatus: 'research',
     createdAt: '2026-06-04',
     lastInteraction: '2026-06-04',
-    documents: [
-      'clinical-data-map-v2.pdf',
-      'hipaa-gap-assessment.docx',
-      'legacy-ehr-integration-diagram.pdf',
-    ],
+    documents: normalizeDocuments(
+      [
+        'clinical-data-map-v2.pdf',
+        'hipaa-gap-assessment.docx',
+        'legacy-ehr-integration-diagram.pdf',
+      ],
+      'intake',
+    ),
     researchProgress: 45,
     assessmentStatus: 'draft',
     remarks: ['Clinical informatics lead assigned as technical champion.'],

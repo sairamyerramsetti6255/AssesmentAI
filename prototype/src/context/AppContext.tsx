@@ -1,26 +1,27 @@
+/**
+ * AppContext — Supabase-backed via Node.js /api/proto/* routes.
+ * All state is fetched from and persisted to the database.
+ * Falls back to in-memory for operations that fail (network errors).
+ */
+
 import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from 'react'
 import type { ActivityKind } from '../types'
+import * as api from '../lib/api'
 import {
-  initialMandatoryQuestions,
-  initialMasterData,
-  initialPlatformUsers,
-} from '../data/admin-master-data'
-import { generatedQuestions, initialLeads } from '../data/mock'
-import type { ResearchResult } from '../lib/ai-services'
-import {
-  mandatoryOptionsFromAssessment,
-  newBlankQuestion,
   normalizeSortOrder,
   pillarToCategory,
   stripMandatoryFromAssessment,
   syncAssessmentWithMandatory,
+  newBlankQuestion,
+  mandatoryOptionsFromAssessment,
 } from '../lib/questions'
 import { normalizeInputType } from '../lib/question-types'
 import type {
@@ -34,47 +35,10 @@ import type {
   PlatformUser,
   UserRole,
 } from '../types'
+import type { ResearchResult } from '../lib/ai-services'
+import { documentFromFile } from '../lib/documents'
 
-const SESSION_USER_KEY = 'ai-readiness-user-id'
-
-function readStoredUserId(): string | null {
-  try {
-    return sessionStorage.getItem(SESSION_USER_KEY)
-  } catch {
-    return null
-  }
-}
-
-const initialActivityLog: ActivityLogEntry[] = [
-  {
-    id: 'log-1',
-    at: '2026-06-04T08:15:00',
-    kind: 'user.login',
-    actorName: 'Elena Vasquez',
-    actorRole: 'super_admin',
-    summary: 'Super Admin signed in',
-  },
-  {
-    id: 'log-2',
-    at: '2026-06-04T09:20:00',
-    kind: 'client.portal_save',
-    actorName: 'Pacific Retail (client)',
-    actorRole: 'account_executive',
-    summary: 'Assessment progress saved — 45%',
-    leadId: 'lead-2',
-    companyName: 'Pacific Retail Group',
-  },
-  {
-    id: 'log-3',
-    at: '2026-06-03T14:00:00',
-    kind: 'assessment.approve',
-    actorName: 'Marcus Webb',
-    actorRole: 'team_lead',
-    summary: 'Assessment approved — portal link issued',
-    leadId: 'lead-2',
-    companyName: 'Pacific Retail Group',
-  },
-]
+// ── Context shape ─────────────────────────────────────────────────────────
 
 interface AppContextValue {
   leads: Lead[]
@@ -82,554 +46,489 @@ interface AppContextValue {
   selectedLeadId: string | null
   setSelectedLeadId: (id: string | null) => void
   selectedLead: Lead | undefined
-  addLead: (lead: Omit<Lead, 'id' | 'remarks' | 'researchProgress' | 'assessmentStatus' | 'funnelStatus' | 'createdAt' | 'lastInteraction' | 'documents'> & { documents?: string[] }) => void
+  loading: boolean
+  addLead: (
+    input: Omit<Lead, 'id' | 'remarks' | 'researchProgress' | 'assessmentStatus' | 'funnelStatus' | 'createdAt' | 'lastInteraction' | 'documents'> & {
+      pendingFiles?: File[]
+      documentRecords?: Lead['documents']
+    },
+  ) => Promise<void>
   startResearch: (leadId: string) => void
-  finishResearch: (leadId: string, research: ResearchResult) => void
-  setQuestions: (questions: AssessmentQuestion[]) => void
+  finishResearch: (leadId: string, research: ResearchResult) => Promise<void>
+  setQuestions: (questions: AssessmentQuestion[]) => Promise<void>
   addQuestion: () => void
   moveQuestionUp: (id: string) => void
   moveQuestionDown: (id: string) => void
   updateQuestion: (id: string, patch: Partial<AssessmentQuestion>) => void
   deleteQuestion: (id: string) => void
-  setLeadTaxonomy: (leadId: string, taxonomy: AssessmentTaxonomy) => void
-  setAssessmentStatus: (leadId: string, status: AssessmentStatus) => void
-  addRemark: (leadId: string, text: string) => void
-  moveLeadStatus: (leadId: string, status: Lead['funnelStatus']) => void
+  setLeadTaxonomy: (leadId: string, taxonomy: AssessmentTaxonomy) => Promise<void>
+  setAssessmentStatus: (leadId: string, status: AssessmentStatus) => Promise<void>
+  addRemark: (leadId: string, text: string) => Promise<void>
+  moveLeadStatus: (leadId: string, status: Lead['funnelStatus']) => Promise<void>
   saveClientResponses: (
     leadId: string,
     answers: Record<string, string | number | string[]>,
     richtext: Record<string, string>,
     progress: number,
-    extras?: {
-      otherText?: Record<string, string>
-      uploadedDocuments?: string[]
-    },
-  ) => void
+    extras?: { otherText?: Record<string, string>; uploadedDocuments?: import('../types').LeadDocument[] },
+  ) => Promise<void>
   platformUsers: PlatformUser[]
-  registerPlatformUser: (user: Omit<PlatformUser, 'id'>) => void
+  registerPlatformUser: (user: Omit<PlatformUser, 'id'>) => Promise<void>
   masterData: Record<MasterDataCategory, string[]>
-  addMasterDataItem: (category: MasterDataCategory, name: string) => void
-  updateMasterDataItem: (category: MasterDataCategory, oldName: string, newName: string) => void
-  deleteMasterDataItem: (category: MasterDataCategory, name: string) => void
+  addMasterDataItem: (category: MasterDataCategory, name: string) => Promise<void>
+  updateMasterDataItem: (category: MasterDataCategory, oldName: string, newName: string) => Promise<void>
+  deleteMasterDataItem: (category: MasterDataCategory, name: string) => Promise<void>
   mandatoryQuestions: MandatoryQuestion[]
-  addMandatoryQuestion: (text: string) => void
-  updateMandatoryQuestion: (id: string, patch: Partial<MandatoryQuestion>) => void
-  deleteMandatoryQuestion: (id: string) => void
+  addMandatoryQuestion: (text: string) => Promise<void>
+  updateMandatoryQuestion: (id: string, patch: Partial<MandatoryQuestion>) => Promise<void>
+  deleteMandatoryQuestion: (id: string) => Promise<void>
   currentUser: PlatformUser | null
-  login: (email: string, password: string) => boolean
+  login: (email: string, password: string) => Promise<boolean>
   logout: () => void
-  updateProfile: (patch: { name?: string; email?: string; password?: string }) => void
-  updatePlatformUser: (id: string, patch: Partial<PlatformUser>) => void
-  deletePlatformUser: (id: string) => void
+  updateProfile: (patch: { name?: string; email?: string; password?: string }) => Promise<void>
+  updatePlatformUser: (id: string, patch: Partial<PlatformUser>) => Promise<void>
+  deletePlatformUser: (id: string) => Promise<void>
   activityLog: ActivityLogEntry[]
   logActivity: (
     kind: ActivityKind,
     summary: string,
     extra?: { leadId?: string; companyName?: string; actorName?: string; actorRole?: UserRole },
-  ) => void
+  ) => Promise<void>
+  refreshLeads: () => Promise<void>
+  refreshQuestions: (leadId: string) => Promise<void>
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
 
-export function AppProvider({ children }: { children: ReactNode }) {
-  const [leads, setLeads] = useState<Lead[]>(initialLeads)
-  const [mandatoryQuestions, setMandatoryQuestions] = useState<MandatoryQuestion[]>(
-    initialMandatoryQuestions,
-  )
-  const [questions, setQuestions] = useState<AssessmentQuestion[]>(() =>
-    syncAssessmentWithMandatory(generatedQuestions, initialMandatoryQuestions),
-  )
-  const [selectedLeadId, setSelectedLeadId] = useState<string | null>('lead-1')
-  const [platformUsers, setPlatformUsers] = useState<PlatformUser[]>(initialPlatformUsers)
-  const [masterData, setMasterData] =
-    useState<Record<MasterDataCategory, string[]>>(initialMasterData)
-  const [currentUserId, setCurrentUserId] = useState<string | null>(() => readStoredUserId())
-  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>(initialActivityLog)
+// ── Default empty master data ─────────────────────────────────────────────
 
-  const currentUser = platformUsers.find((u) => u.id === currentUserId) ?? null
+const EMPTY_MASTER: Record<MasterDataCategory, string[]> = {
+  industries: [],
+  drivers: [],
+  solutions: [],
+  painPoints: [],
+  maturityStages: [],
+}
+
+// ── Provider ──────────────────────────────────────────────────────────────
+
+export function AppProvider({ children }: { children: ReactNode }) {
+  const [leads, setLeads] = useState<Lead[]>([])
+  const [questions, setQuestionsState] = useState<AssessmentQuestion[]>([])
+  const [mandatoryQuestions, setMandatoryQuestions] = useState<MandatoryQuestion[]>([])
+  const [platformUsers, setPlatformUsers] = useState<PlatformUser[]>([])
+  const [masterData, setMasterData] = useState<Record<MasterDataCategory, string[]>>(EMPTY_MASTER)
+  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([])
+  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null)
+  const [currentUser, setCurrentUser] = useState<PlatformUser | null>(null)
+  const [loading, setLoading] = useState(true)
+
   const selectedLead = leads.find((l) => l.id === selectedLeadId)
 
-  const logActivity = useCallback(
-    (
-      kind: ActivityKind,
-      summary: string,
-      extra?: { leadId?: string; companyName?: string; actorName?: string; actorRole?: UserRole },
-    ) => {
-      const actor = currentUser
-      const entry: ActivityLogEntry = {
-        id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        at: new Date().toISOString(),
-        kind,
-        actorName: extra?.actorName ?? actor?.name ?? 'System',
-        actorRole: extra?.actorRole ?? actor?.role ?? 'account_executive',
-        summary,
-        leadId: extra?.leadId,
-        companyName: extra?.companyName,
-      }
-      setActivityLog((prev) => [entry, ...prev].slice(0, 200))
-    },
-    [currentUser],
-  )
+  // ── Bootstrap on mount ─────────────────────────────────────────────────
 
-  const login = useCallback((email: string, password: string): boolean => {
-    const user = platformUsers.find(
-      (u) => u.email.toLowerCase() === email.trim().toLowerCase() && u.password === password,
-    )
-    if (!user) return false
-    const now = new Date().toISOString()
-    setPlatformUsers((prev) =>
-      prev.map((u) => (u.id === user.id ? { ...u, lastLogin: now } : u)),
-    )
-    setCurrentUserId(user.id)
-    try {
-      sessionStorage.setItem(SESSION_USER_KEY, user.id)
-    } catch {
-      /* ignore */
+  useEffect(() => {
+    async function bootstrap() {
+      try {
+        await Promise.all([
+          fetchLeads(),
+          fetchMandatory(),
+          fetchMasterData(),
+          fetchUsers(),
+          fetchActivityLog(),
+        ])
+        // Restore session
+        const token = api.getToken()
+        if (token) {
+          try {
+            const me = await api.getMe()
+            setCurrentUser(me)
+          } catch { api.setToken(null) }
+        }
+      } catch (e) {
+        console.error('[AppContext] bootstrap failed:', e)
+      } finally {
+        setLoading(false)
+      }
     }
-    setActivityLog((prev) => [
-      {
-        id: `log-${Date.now()}`,
-        at: now,
-        kind: 'user.login',
-        actorName: user.name,
-        actorRole: user.role,
-        summary: `${user.name} signed in`,
-      },
-      ...prev,
-    ])
-    return true
-  }, [platformUsers])
+    bootstrap()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ── Fetch helpers ──────────────────────────────────────────────────────
+
+  async function fetchLeads() {
+    const raw = await api.getLeads() as unknown as api.DbLead[]
+    setLeads(raw.map(api.dbToLead))
+    if (raw.length > 0) {
+      setSelectedLeadId((prev) => prev ?? raw[0].id)
+    }
+  }
+
+  async function fetchQuestions(leadId: string) {
+    const raw = await api.getQuestions(leadId) as unknown as Record<string, unknown>[]
+    const mqs = await api.getMandatoryQuestions() as unknown as Record<string, unknown>[]
+    const mapped = raw.map(api.dbToQuestion)
+    const synced = syncAssessmentWithMandatory(mapped, mqs.map(api.dbToMandatory))
+    setQuestionsState(synced)
+  }
+
+  async function fetchMandatory() {
+    const raw = await api.getMandatoryQuestions() as unknown as Record<string, unknown>[]
+    setMandatoryQuestions(raw.map(api.dbToMandatory))
+  }
+
+  async function fetchMasterData() {
+    const raw = await api.getMasterData()
+    setMasterData({ ...EMPTY_MASTER, ...raw })
+  }
+
+  async function fetchUsers() {
+    const raw = await api.getUsers()
+    setPlatformUsers(raw)
+  }
+
+  async function fetchActivityLog() {
+    const raw = await api.getActivityLog()
+    setActivityLog(raw)
+  }
+
+  const refreshLeads = useCallback(async () => { await fetchLeads() }, [])
+  const refreshQuestions = useCallback(async (leadId: string) => { await fetchQuestions(leadId) }, [])
+
+  // Update questions when selected lead changes
+  useEffect(() => {
+    if (selectedLeadId) fetchQuestions(selectedLeadId)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLeadId])
+
+  // ── Activity helper ────────────────────────────────────────────────────
+
+  const doLogActivity = useCallback(async (
+    kind: ActivityKind,
+    summary: string,
+    extra?: { leadId?: string; companyName?: string; actorName?: string; actorRole?: UserRole },
+  ) => {
+    try {
+      const entry = await api.logActivity(kind, summary, {
+        ...extra,
+        actorName: extra?.actorName ?? currentUser?.name ?? 'System',
+        actorRole: extra?.actorRole ?? (currentUser?.role as UserRole) ?? 'account_executive',
+      })
+      setActivityLog((prev) => [entry, ...prev].slice(0, 200))
+    } catch { /* activity log is non-critical */ }
+  }, [currentUser])
+
+  // ── Persist questions ──────────────────────────────────────────────────
+
+  const persistQuestions = useCallback(async (leadId: string, qs: AssessmentQuestion[]) => {
+    try {
+      await api.saveQuestions(leadId, qs)
+    } catch (e) {
+      console.error('[AppContext] saveQuestions failed:', e)
+    }
+  }, [])
+
+  // ── AUTH ───────────────────────────────────────────────────────────────
+
+  const login = useCallback(async (email: string, password: string): Promise<boolean> => {
+    try {
+      const { user } = await api.login(email, password)
+      setCurrentUser(user)
+      await doLogActivity('user.login', `${user.name} signed in`)
+      return true
+    } catch { return false }
+  }, [doLogActivity])
 
   const logout = useCallback(() => {
     if (currentUser) {
-      setActivityLog((prev) => [
-        {
-          id: `log-${Date.now()}`,
-          at: new Date().toISOString(),
-          kind: 'user.logout',
-          actorName: currentUser.name,
-          actorRole: currentUser.role,
-          summary: `${currentUser.name} signed out`,
-        },
-        ...prev,
-      ])
+      void doLogActivity('user.logout', `${currentUser.name} signed out`)
     }
-    setCurrentUserId(null)
-    try {
-      sessionStorage.removeItem(SESSION_USER_KEY)
-    } catch {
-      /* ignore */
+    api.setToken(null)
+    setCurrentUser(null)
+  }, [currentUser, doLogActivity])
+
+  const updateProfile = useCallback(async (patch: { name?: string; email?: string; password?: string }) => {
+    if (!currentUser) return
+    const updated = await api.updateUser(currentUser.id, patch)
+    setCurrentUser(updated)
+    setPlatformUsers((prev) => prev.map((u) => u.id === updated.id ? updated : u))
+    await doLogActivity('user.update', 'Profile updated')
+  }, [currentUser, doLogActivity])
+
+  // ── LEADS ──────────────────────────────────────────────────────────────
+
+  const addLead = useCallback(async (
+    input: Omit<Lead, 'id' | 'remarks' | 'researchProgress' | 'assessmentStatus' | 'funnelStatus' | 'createdAt' | 'lastInteraction' | 'documents'> & {
+      pendingFiles?: File[]
+      documentRecords?: Lead['documents']
+    },
+  ) => {
+    const raw = await api.createLead({
+      companyName: input.companyName,
+      industry: input.industry,
+      domain: input.domain,
+      country: input.country,
+      assignedExecutive: input.assignedExecutive,
+      documentRecords: input.documentRecords,
+    })
+    let lead = api.dbToLead(raw as unknown as api.DbLead)
+
+    if (input.pendingFiles?.length) {
+      for (const file of input.pendingFiles) {
+        const meta = documentFromFile(file, 'intake')
+        const uploaded = await api.uploadLeadDocument(lead.id, file, meta)
+        lead = api.dbToLead(uploaded.lead as unknown as api.DbLead)
+      }
     }
-  }, [currentUser])
 
-  const updateProfile = useCallback(
-    (patch: { name?: string; email?: string; password?: string }) => {
-      if (!currentUserId) return
-      setPlatformUsers((prev) =>
-        prev.map((u) =>
-          u.id === currentUserId
-            ? {
-                ...u,
-                name: patch.name?.trim() || u.name,
-                email: patch.email?.trim() || u.email,
-                password: patch.password?.trim() || u.password,
-              }
-            : u,
-        ),
-      )
-      logActivity('user.update', 'Profile updated')
-    },
-    [currentUserId, logActivity],
-  )
-
-  const updatePlatformUser = useCallback(
-    (id: string, patch: Partial<PlatformUser>) => {
-      setPlatformUsers((prev) =>
-        prev.map((u) => (u.id === id ? { ...u, ...patch, email: patch.email?.trim() || u.email } : u)),
-      )
-      logActivity('user.update', `User account updated (${patch.name ?? id})`)
-    },
-    [logActivity],
-  )
-
-  const deletePlatformUser = useCallback(
-    (id: string) => {
-      if (id === currentUserId) return
-      const removed = platformUsers.find((u) => u.id === id)
-      setPlatformUsers((prev) => prev.filter((u) => u.id !== id))
-      if (removed) {
-        logActivity('user.delete', `User removed: ${removed.name}`)
-      }
-    },
-    [currentUserId, platformUsers, logActivity],
-  )
-
-  const addLead = useCallback(
-    (
-      input: Omit<
-        Lead,
-        | 'id'
-        | 'remarks'
-        | 'researchProgress'
-        | 'assessmentStatus'
-        | 'funnelStatus'
-        | 'createdAt'
-        | 'lastInteraction'
-        | 'documents'
-      > & { documents?: string[] },
-    ) => {
-      const id = `lead-${Date.now()}`
-      const today = new Date().toISOString().slice(0, 10)
-      const lead: Lead = {
-        id,
-        companyName: input.companyName,
-        industry: input.industry,
-        domain: input.domain,
-        country: input.country,
-        assignedExecutive: input.assignedExecutive,
-        funnelStatus: 'intake',
-        createdAt: today,
-        lastInteraction: today,
-        documents: input.documents ?? [],
-        researchProgress: 0,
-        assessmentStatus: 'draft',
-        remarks: [],
-      }
-      setLeads((prev) => [lead, ...prev])
-      setSelectedLeadId(id)
-    },
-    [],
-  )
+    setLeads((prev) => [lead, ...prev])
+    setSelectedLeadId(lead.id)
+  }, [])
 
   const startResearch = useCallback((leadId: string) => {
     setLeads((prev) =>
-      prev.map((l) =>
-        l.id === leadId
-          ? { ...l, funnelStatus: 'research', researchProgress: 10 }
-          : l,
-      ),
+      prev.map((l) => l.id === leadId ? { ...l, funnelStatus: 'research' as const, researchProgress: 10 } : l),
     )
+    void api.updateLead(leadId, { funnel_status: 'research', research_progress: 10 })
   }, [])
 
-  const finishResearch = useCallback((leadId: string, research: ResearchResult) => {
-    setLeads((prev) =>
-      prev.map((l) =>
-        l.id === leadId
-          ? {
-              ...l,
-              researchProgress: 100,
-              funnelStatus: 'review',
-              aiResearch: research,
-              lastInteraction: new Date().toISOString().slice(0, 10),
-            }
-          : l,
-      ),
-    )
+  const finishResearch = useCallback(async (leadId: string, research: ResearchResult) => {
+    const patch = {
+      research_progress: 100,
+      funnel_status: 'review',
+      ai_research: research as unknown as Record<string, unknown>,
+      last_interaction: new Date().toISOString().slice(0, 10),
+    }
+    const raw = await api.updateLead(leadId, patch)
+    const lead = api.dbToLead(raw as unknown as api.DbLead)
+    setLeads((prev) => prev.map((l) => l.id === leadId ? lead : l))
   }, [])
 
-  const applyQuestions = useCallback(
-    (next: AssessmentQuestion[]) => {
-      setQuestions(syncAssessmentWithMandatory(next, mandatoryQuestions))
-    },
-    [mandatoryQuestions],
-  )
+  const setLeadTaxonomy = useCallback(async (leadId: string, taxonomy: AssessmentTaxonomy) => {
+    const raw = await api.updateLead(leadId, { assessment_taxonomy: taxonomy as unknown as Record<string, unknown> })
+    const lead = api.dbToLead(raw as unknown as api.DbLead)
+    setLeads((prev) => prev.map((l) => l.id === leadId ? lead : l))
+  }, [])
 
-  const syncQuestionsFromMandatory = useCallback(
-    (mandatory: MandatoryQuestion[]) => {
-      setQuestions((prev) => syncAssessmentWithMandatory(prev, mandatory))
-    },
-    [],
-  )
+  const setAssessmentStatus = useCallback(async (leadId: string, status: AssessmentStatus) => {
+    let raw: Lead
+    if (status === 'approved') {
+      raw = api.dbToLead((await api.approveLead(leadId)) as unknown as api.DbLead)
+    } else {
+      raw = api.dbToLead((await api.updateLead(leadId, { assessment_status: status })) as unknown as api.DbLead)
+    }
+    setLeads((prev) => prev.map((l) => l.id === leadId ? raw : l))
+    if (status === 'approved') {
+      const lead = leads.find((l) => l.id === leadId)
+      await doLogActivity('assessment.approve', `Assessment approved for ${lead?.companyName}`, {
+        leadId, companyName: lead?.companyName,
+      })
+    }
+  }, [leads, doLogActivity])
+
+  const addRemark = useCallback(async (leadId: string, text: string) => {
+    if (!text.trim()) return
+    const raw = await api.addRemark(leadId, text)
+    const lead = api.dbToLead(raw as unknown as api.DbLead)
+    setLeads((prev) => prev.map((l) => l.id === leadId ? lead : l))
+  }, [])
+
+  const moveLeadStatus = useCallback(async (leadId: string, status: Lead['funnelStatus']) => {
+    const raw = await api.updateLead(leadId, { funnel_status: status })
+    const lead = api.dbToLead(raw as unknown as api.DbLead)
+    setLeads((prev) => prev.map((l) => l.id === leadId ? lead : l))
+  }, [])
+
+  const saveClientResponses = useCallback(async (
+    leadId: string,
+    answers: Record<string, string | number | string[]>,
+    richtext: Record<string, string>,
+    progress: number,
+    extras?: { otherText?: Record<string, string>; uploadedDocuments?: import('../types').LeadDocument[] },
+  ) => {
+    const raw = await api.saveClientResponses(leadId, answers, richtext, progress, extras)
+    const lead = api.dbToLead(raw as unknown as api.DbLead)
+    setLeads((prev) => prev.map((l) => l.id === leadId ? lead : l))
+  }, [])
+
+  // ── QUESTIONS ──────────────────────────────────────────────────────────
+
+  const setQuestionsAndPersist = useCallback(async (qs: AssessmentQuestion[]) => {
+    const synced = syncAssessmentWithMandatory(qs, mandatoryQuestions)
+    setQuestionsState(synced)
+    if (selectedLeadId) await persistQuestions(selectedLeadId, synced)
+  }, [mandatoryQuestions, selectedLeadId, persistQuestions])
 
   const addQuestion = useCallback(() => {
-    setQuestions((prev) => {
+    setQuestionsState((prev) => {
       const optional = stripMandatoryFromAssessment(prev, mandatoryQuestions)
-      return syncAssessmentWithMandatory(
-        [...optional, newBlankQuestion(optional.length)],
+      const next = syncAssessmentWithMandatory([...optional, newBlankQuestion(optional.length)], mandatoryQuestions)
+      if (selectedLeadId) void persistQuestions(selectedLeadId, next)
+      return next
+    })
+  }, [mandatoryQuestions, selectedLeadId, persistQuestions])
+
+  const moveQuestionUp = useCallback((id: string) => {
+    setQuestionsState((prev) => {
+      const sorted = normalizeSortOrder(prev)
+      const idx = sorted.findIndex((q) => q.id === id)
+      const q = sorted[idx]
+      if (idx <= 0 || !q || q.isMandatory) return sorted
+      const mandatoryCount = mandatoryQuestions.length
+      if (idx <= mandatoryCount) return sorted
+      const next = [...sorted]
+      ;[next[idx - 1], next[idx]] = [next[idx], next[idx - 1]]
+      const synced = syncAssessmentWithMandatory(normalizeSortOrder(next), mandatoryQuestions)
+      if (selectedLeadId) void persistQuestions(selectedLeadId, synced)
+      return synced
+    })
+  }, [mandatoryQuestions, selectedLeadId, persistQuestions])
+
+  const moveQuestionDown = useCallback((id: string) => {
+    setQuestionsState((prev) => {
+      const sorted = normalizeSortOrder(prev)
+      const idx = sorted.findIndex((q) => q.id === id)
+      const q = sorted[idx]
+      if (idx < 0 || idx >= sorted.length - 1 || !q || q.isMandatory) return sorted
+      const next = [...sorted]
+      ;[next[idx], next[idx + 1]] = [next[idx + 1], next[idx]]
+      const synced = syncAssessmentWithMandatory(normalizeSortOrder(next), mandatoryQuestions)
+      if (selectedLeadId) void persistQuestions(selectedLeadId, synced)
+      return synced
+    })
+  }, [mandatoryQuestions, selectedLeadId, persistQuestions])
+
+  const updateQuestion = useCallback((id: string, patch: Partial<AssessmentQuestion>) => {
+    if (mandatoryQuestions.some((m) => m.id === id)) {
+      // Mandatory question edit — update in DB too
+      const type = patch.type ? (normalizeInputType(patch.type) as MandatoryQuestion['type']) : undefined
+      const mPatch: Partial<MandatoryQuestion> = {}
+      if (patch.text) mPatch.text = patch.text
+      if (type) mPatch.type = type
+      if (patch.options) mPatch.options = mandatoryOptionsFromAssessment(patch.options)
+      void api.updateMandatoryQuestion(id, mPatch).then(() => fetchMandatory())
+      setQuestionsState((prev) => syncAssessmentWithMandatory(
+        normalizeSortOrder(prev.map((q) => {
+          if (q.id !== id) return q
+          const merged = { ...q, ...patch }
+          if (patch.taxonomyPillar) merged.category = pillarToCategory(patch.taxonomyPillar)
+          return merged
+        })),
+        mandatoryQuestions,
+      ))
+      return
+    }
+
+    setQuestionsState((prev) => {
+      const synced = syncAssessmentWithMandatory(
+        normalizeSortOrder(
+          prev.map((q) => {
+            if (q.id !== id) return q
+            const merged = { ...q, ...patch }
+            if (patch.taxonomyPillar) merged.category = pillarToCategory(patch.taxonomyPillar)
+            return merged
+          }),
+        ),
         mandatoryQuestions,
       )
+      if (selectedLeadId) void persistQuestions(selectedLeadId, synced)
+      return synced
     })
-  }, [mandatoryQuestions])
+  }, [mandatoryQuestions, selectedLeadId, persistQuestions])
 
-  const moveQuestionUp = useCallback(
-    (id: string) => {
-      setQuestions((prev) => {
-        const sorted = normalizeSortOrder(prev)
-        const idx = sorted.findIndex((q) => q.id === id)
-        const q = sorted[idx]
-        if (idx <= 0 || !q || q.isMandatory) return sorted
-        const mandatoryCount = mandatoryQuestions.length
-        if (idx <= mandatoryCount) return sorted
-        const next = [...sorted]
-        ;[next[idx - 1], next[idx]] = [next[idx], next[idx - 1]]
-        return syncAssessmentWithMandatory(normalizeSortOrder(next), mandatoryQuestions)
-      })
-    },
-    [mandatoryQuestions],
-  )
-
-  const moveQuestionDown = useCallback(
-    (id: string) => {
-      setQuestions((prev) => {
-        const sorted = normalizeSortOrder(prev)
-        const idx = sorted.findIndex((q) => q.id === id)
-        const q = sorted[idx]
-        if (idx < 0 || idx >= sorted.length - 1 || !q || q.isMandatory) return sorted
-        const next = [...sorted]
-        ;[next[idx], next[idx + 1]] = [next[idx + 1], next[idx]]
-        return syncAssessmentWithMandatory(normalizeSortOrder(next), mandatoryQuestions)
-      })
-    },
-    [mandatoryQuestions],
-  )
-
-  const updateQuestion = useCallback(
-    (id: string, patch: Partial<AssessmentQuestion>) => {
-      if (mandatoryQuestions.some((m) => m.id === id)) {
-        setMandatoryQuestions((prev) => {
-          const next = prev.map((m) => {
-            if (m.id !== id) return m
-            const type = patch.type
-              ? (normalizeInputType(patch.type) as MandatoryQuestion['type'])
-              : m.type
-            return {
-              ...m,
-              text: patch.text ?? m.text,
-              type,
-              options: patch.options
-                ? mandatoryOptionsFromAssessment(patch.options)
-                : m.options,
-            }
-          })
-          setQuestions((questions) => syncAssessmentWithMandatory(questions, next))
-          return next
-        })
-        return
-      }
-      setQuestions((prev) =>
-        syncAssessmentWithMandatory(
-          normalizeSortOrder(
-            prev.map((q) => {
-              if (q.id !== id) return q
-              const merged = { ...q, ...patch }
-              if (patch.taxonomyPillar) {
-                merged.category = pillarToCategory(patch.taxonomyPillar)
-              }
-              return merged
-            }),
-          ),
-          mandatoryQuestions,
-        ),
+  const deleteQuestion = useCallback((id: string) => {
+    if (mandatoryQuestions.some((m) => m.id === id)) return
+    setQuestionsState((prev) => {
+      const synced = syncAssessmentWithMandatory(
+        normalizeSortOrder(prev.filter((q) => q.id !== id)),
+        mandatoryQuestions,
       )
-    },
-    [mandatoryQuestions],
-  )
-
-  const deleteQuestion = useCallback(
-    (id: string) => {
-      if (mandatoryQuestions.some((m) => m.id === id)) return
-      setQuestions((prev) =>
-        syncAssessmentWithMandatory(
-          normalizeSortOrder(prev.filter((q) => q.id !== id)),
-          mandatoryQuestions,
-        ),
-      )
-    },
-    [mandatoryQuestions],
-  )
-
-  const setLeadTaxonomy = useCallback((leadId: string, taxonomy: AssessmentTaxonomy) => {
-    setLeads((prev) =>
-      prev.map((l) => (l.id === leadId ? { ...l, assessmentTaxonomy: taxonomy } : l)),
-    )
-  }, [])
-
-  const setAssessmentStatus = useCallback(
-    (leadId: string, status: AssessmentStatus) => {
-      setLeads((prev) =>
-        prev.map((l) => {
-          if (l.id !== leadId) return l
-          const portalToken =
-            status === 'approved'
-              ? `${l.domain.split('.')[0]}-${Math.random().toString(36).slice(2, 6)}`
-              : l.portalToken
-          return {
-            ...l,
-            assessmentStatus: status,
-            portalToken,
-            funnelStatus: status === 'approved' ? 'client_portal' : l.funnelStatus,
-            lastInteraction: new Date().toISOString().slice(0, 10),
-          }
-        }),
-      )
-      const lead = leads.find((l) => l.id === leadId)
-      if (status === 'approved' && lead) {
-        logActivity('assessment.approve', `Assessment approved for ${lead.companyName}`, {
-          leadId,
-          companyName: lead.companyName,
-        })
-      }
-    },
-    [leads, logActivity],
-  )
-
-  const addRemark = useCallback((leadId: string, text: string) => {
-    if (!text.trim()) return
-    setLeads((prev) =>
-      prev.map((l) =>
-        l.id === leadId
-          ? {
-              ...l,
-              remarks: [...l.remarks, text.trim()],
-              lastInteraction: new Date().toISOString().slice(0, 10),
-            }
-          : l,
-      ),
-    )
-  }, [])
-
-  const moveLeadStatus = useCallback((leadId: string, status: Lead['funnelStatus']) => {
-    setLeads((prev) =>
-      prev.map((l) =>
-        l.id === leadId
-          ? { ...l, funnelStatus: status, lastInteraction: new Date().toISOString().slice(0, 10) }
-          : l,
-      ),
-    )
-  }, [])
-
-  const registerPlatformUser = useCallback(
-    (user: Omit<PlatformUser, 'id'>) => {
-      const id = `u-${Date.now()}`
-      setPlatformUsers((prev) => [
-        ...prev,
-        {
-          ...user,
-          id,
-          password: user.password || 'changeme123',
-        },
-      ])
-      logActivity('user.register', `New user registered: ${user.name}`)
-    },
-    [logActivity],
-  )
-
-  const addMasterDataItem = useCallback((category: MasterDataCategory, name: string) => {
-    const trimmed = name.trim()
-    if (!trimmed) return
-    setMasterData((prev) => {
-      if (prev[category].includes(trimmed)) return prev
-      return { ...prev, [category]: [...prev[category], trimmed] }
+      if (selectedLeadId) void persistQuestions(selectedLeadId, synced)
+      return synced
     })
+  }, [mandatoryQuestions, selectedLeadId, persistQuestions])
+
+  // ── PLATFORM USERS ─────────────────────────────────────────────────────
+
+  const registerPlatformUser = useCallback(async (user: Omit<PlatformUser, 'id'>) => {
+    const created = await api.createUser(user)
+    setPlatformUsers((prev) => [...prev, created])
+    await doLogActivity('user.register', `New user registered: ${user.name}`)
+  }, [doLogActivity])
+
+  const updatePlatformUser = useCallback(async (id: string, patch: Partial<PlatformUser>) => {
+    const updated = await api.updateUser(id, patch)
+    setPlatformUsers((prev) => prev.map((u) => u.id === id ? updated : u))
+    await doLogActivity('user.update', `User account updated (${patch.name ?? id})`)
+  }, [doLogActivity])
+
+  const deletePlatformUser = useCallback(async (id: string) => {
+    if (id === currentUser?.id) return
+    const removed = platformUsers.find((u) => u.id === id)
+    await api.deleteUser(id)
+    setPlatformUsers((prev) => prev.filter((u) => u.id !== id))
+    if (removed) await doLogActivity('user.delete', `User removed: ${removed.name}`)
+  }, [currentUser?.id, platformUsers, doLogActivity])
+
+  // ── MASTER DATA ────────────────────────────────────────────────────────
+
+  const addMasterDataItem = useCallback(async (category: MasterDataCategory, name: string) => {
+    await api.addMasterDataItem(category, name)
+    setMasterData((prev) => ({ ...prev, [category]: [...(prev[category] ?? []), name] }))
   }, [])
 
-  const updateMasterDataItem = useCallback(
-    (category: MasterDataCategory, oldName: string, newName: string) => {
-      const trimmed = newName.trim()
-      if (!trimmed || trimmed === oldName) return
-      setMasterData((prev) => {
-        if (prev[category].includes(trimmed)) return prev
-        return {
-          ...prev,
-          [category]: prev[category].map((x) => (x === oldName ? trimmed : x)),
-        }
-      })
-    },
-    [],
-  )
-
-  const deleteMasterDataItem = useCallback((category: MasterDataCategory, name: string) => {
+  const updateMasterDataItem = useCallback(async (category: MasterDataCategory, oldName: string, newName: string) => {
+    await api.updateMasterDataItem(category, oldName, newName)
     setMasterData((prev) => ({
       ...prev,
-      [category]: prev[category].filter((x) => x !== name),
+      [category]: prev[category].map((x) => x === oldName ? newName : x),
     }))
   }, [])
 
-  const addMandatoryQuestion = useCallback(
-    (text: string) => {
-      const trimmed = text.trim()
-      if (!trimmed) return
-      setMandatoryQuestions((prev) => {
-        const next: MandatoryQuestion[] = [
-          ...prev,
-          {
-            id: `mq-${Date.now()}`,
-            text: trimmed,
-            type: 'singlechoice',
-            options: ['Option 1', 'Option 2', 'Option 3'],
-          },
-        ]
-        syncQuestionsFromMandatory(next)
-        return next
-      })
-    },
-    [syncQuestionsFromMandatory],
-  )
+  const deleteMasterDataItem = useCallback(async (category: MasterDataCategory, name: string) => {
+    await api.deleteMasterDataItem(category, name)
+    setMasterData((prev) => ({ ...prev, [category]: prev[category].filter((x) => x !== name) }))
+  }, [])
 
-  const updateMandatoryQuestion = useCallback(
-    (id: string, patch: Partial<MandatoryQuestion>) => {
-      setMandatoryQuestions((prev) => {
-        const next = prev.map((q) => (q.id === id ? { ...q, ...patch } : q))
-        syncQuestionsFromMandatory(next)
-        return next
-      })
-    },
-    [syncQuestionsFromMandatory],
-  )
+  // ── MANDATORY QUESTIONS ────────────────────────────────────────────────
 
-  const deleteMandatoryQuestion = useCallback(
-    (id: string) => {
-      setMandatoryQuestions((prev) => {
-        const next = prev.filter((q) => q.id !== id)
-        syncQuestionsFromMandatory(next)
-        return next
-      })
-    },
-    [syncQuestionsFromMandatory],
-  )
+  const addMandatoryQuestion = useCallback(async (text: string) => {
+    const created = await api.createMandatoryQuestion(text)
+    const mq = api.dbToMandatory(created as unknown as Record<string, unknown>)
+    setMandatoryQuestions((prev) => [...prev, mq])
+    setQuestionsState((prev) => syncAssessmentWithMandatory(prev, [...mandatoryQuestions, mq]))
+  }, [mandatoryQuestions])
 
-  const saveClientResponses = useCallback(
-    (
-      leadId: string,
-      answers: Record<string, string | number | string[]>,
-      richtext: Record<string, string>,
-      progress: number,
-      extras?: {
-        otherText?: Record<string, string>
-        uploadedDocuments?: string[]
-      },
-    ) => {
-      setLeads((prev) =>
-        prev.map((l) =>
-          l.id === leadId
-            ? {
-                ...l,
-                clientAnswers: answers,
-                clientRichtext: richtext,
-                clientOtherText: extras?.otherText ?? l.clientOtherText,
-                clientUploadedDocuments:
-                  extras?.uploadedDocuments ?? l.clientUploadedDocuments,
-                clientProgress: progress,
-                lastInteraction: new Date().toISOString().slice(0, 10),
-              }
-            : l,
-        ),
-      )
-    },
-    [],
-  )
+  const updateMandatoryQuestion = useCallback(async (id: string, patch: Partial<MandatoryQuestion>) => {
+    const updated = await api.updateMandatoryQuestion(id, patch)
+    const mq = api.dbToMandatory(updated as unknown as Record<string, unknown>)
+    setMandatoryQuestions((prev) => prev.map((q) => q.id === id ? mq : q))
+    const next = mandatoryQuestions.map((q) => q.id === id ? mq : q)
+    setQuestionsState((prev) => syncAssessmentWithMandatory(prev, next))
+  }, [mandatoryQuestions])
 
-  const value = useMemo(
+  const deleteMandatoryQuestion = useCallback(async (id: string) => {
+    await api.deleteMandatoryQuestion(id)
+    const next = mandatoryQuestions.filter((q) => q.id !== id)
+    setMandatoryQuestions(next)
+    setQuestionsState((prev) => syncAssessmentWithMandatory(prev, next))
+  }, [mandatoryQuestions])
+
+  // ── Value ──────────────────────────────────────────────────────────────
+
+  const value = useMemo<AppContextValue>(
     () => ({
       leads,
       questions,
       selectedLeadId,
       setSelectedLeadId,
       selectedLead,
+      loading,
       addLead,
       startResearch,
       finishResearch,
-      setQuestions: applyQuestions,
+      setQuestions: setQuestionsAndPersist,
       addQuestion,
       moveQuestionUp,
       moveQuestionDown,
@@ -657,46 +556,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updatePlatformUser,
       deletePlatformUser,
       activityLog,
-      logActivity,
+      logActivity: doLogActivity,
+      refreshLeads,
+      refreshQuestions,
     }),
     [
-      leads,
-      questions,
-      selectedLeadId,
-      selectedLead,
-      addLead,
-      startResearch,
-      finishResearch,
-      applyQuestions,
-      addQuestion,
-      moveQuestionUp,
-      moveQuestionDown,
-      updateQuestion,
-      deleteQuestion,
-      setLeadTaxonomy,
-      setAssessmentStatus,
-      addRemark,
-      moveLeadStatus,
-      saveClientResponses,
-      setSelectedLeadId,
-      platformUsers,
-      registerPlatformUser,
-      masterData,
-      addMasterDataItem,
-      updateMasterDataItem,
-      deleteMasterDataItem,
-      mandatoryQuestions,
-      addMandatoryQuestion,
-      updateMandatoryQuestion,
-      deleteMandatoryQuestion,
-      currentUser,
-      login,
-      logout,
-      updateProfile,
-      updatePlatformUser,
-      deletePlatformUser,
-      activityLog,
-      logActivity,
+      leads, questions, selectedLeadId, selectedLead, loading,
+      addLead, startResearch, finishResearch, setQuestionsAndPersist,
+      addQuestion, moveQuestionUp, moveQuestionDown, updateQuestion, deleteQuestion,
+      setLeadTaxonomy, setAssessmentStatus, addRemark, moveLeadStatus, saveClientResponses,
+      platformUsers, registerPlatformUser,
+      masterData, addMasterDataItem, updateMasterDataItem, deleteMasterDataItem,
+      mandatoryQuestions, addMandatoryQuestion, updateMandatoryQuestion, deleteMandatoryQuestion,
+      currentUser, login, logout, updateProfile, updatePlatformUser, deletePlatformUser,
+      activityLog, doLogActivity, refreshLeads, refreshQuestions,
     ],
   )
 

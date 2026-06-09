@@ -106,6 +106,20 @@ export interface AssessmentQuestion {
   isMandatory?: boolean
 }
 
+export type DocumentMatchStatus = 'matched' | 'unmatched'
+
+export interface LeadDocument {
+  id: string
+  name: string
+  matchStatus: DocumentMatchStatus
+  /** Business / statement date on the document */
+  transactionDate: string
+  uploadedAt: string
+  source: 'intake' | 'client'
+  /** Set when file is stored on server — used for download */
+  hasFile?: boolean
+}
+
 export interface Lead {
   id: string
   companyName: string
@@ -116,7 +130,7 @@ export interface Lead {
   funnelStatus: FunnelStatus
   createdAt: string
   lastInteraction: string
-  documents: string[]
+  documents: LeadDocument[]
   researchProgress: number
   assessmentStatus: AssessmentStatus
   portalToken?: string
@@ -126,8 +140,8 @@ export interface Lead {
   /** Free text when client selects "Other" */
   clientOtherText?: Record<string, string>
   clientRichtext?: Record<string, string>
-  /** Filenames uploaded during client assessment (demo) */
-  clientUploadedDocuments?: string[]
+  /** Documents uploaded by client in portal */
+  clientUploadedDocuments?: LeadDocument[]
   aiResearch?: {
     webScrapeUrl: string
     webScrapeExcerpt: string

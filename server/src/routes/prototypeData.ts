@@ -7,10 +7,24 @@
  */
 
 import { Router, Request, Response } from 'express';
+import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import { requireSupabase } from '../lib/supabase.js';
+import { demoDocumentContent, readLeadDocumentFile, saveLeadDocumentFile } from '../lib/documentStore.js';
 
 const router = Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+
+interface DocumentRecord {
+  id: string;
+  name: string;
+  match_status: 'matched' | 'unmatched';
+  transaction_date: string;
+  uploaded_at: string;
+  source: 'intake' | 'client';
+  storage_path?: string;
+  has_file?: boolean;
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -162,7 +176,7 @@ router.post('/leads', async (req: Request, res: Response) => {
   try {
     const {
       company_name, industry, domain, country,
-      assigned_executive, documents,
+      assigned_executive, documents, document_records,
     } = req.body;
     if (!company_name || !industry || !domain) {
       return res.status(400).json({ error: 'company_name, industry, domain required' });
@@ -181,6 +195,7 @@ router.post('/leads', async (req: Request, res: Response) => {
         assessment_status: 'draft',
         research_progress: 0,
         documents: documents ?? [],
+        document_records: document_records ?? [],
         remarks: [],
         last_interaction: today,
       })
@@ -253,7 +268,14 @@ router.put('/leads/:id/client-responses', async (req: Request, res: Response) =>
     if (answers !== undefined)      patch.client_answers         = answers;
     if (richtext !== undefined)     patch.client_richtext        = richtext;
     if (other_text !== undefined)   patch.client_other_text      = other_text;
-    if (uploaded_docs !== undefined) patch.client_uploaded_docs  = uploaded_docs;
+    if (uploaded_docs !== undefined) {
+      patch.client_uploaded_docs = Array.isArray(uploaded_docs)
+        ? uploaded_docs.map((d: { name?: string } | string) => (typeof d === 'string' ? d : d.name))
+        : uploaded_docs;
+    }
+    if (req.body.client_document_records !== undefined) {
+      patch.client_document_records = req.body.client_document_records;
+    }
     if (progress !== undefined)     patch.client_progress        = progress;
 
     const { data, error } = await sb()
@@ -284,6 +306,112 @@ router.post('/leads/:id/remarks', async (req: Request, res: Response) => {
       .single();
     if (error) throw error;
     res.json(data);
+  } catch (e) { err(res, e); }
+});
+
+// ── documents (upload / download) ─────────────────────────────────────────
+
+router.post('/leads/:id/documents', upload.single('file'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'file required' });
+    const lead = await getLead(String(req.params.id));
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+    const meta = JSON.parse(String(req.body.meta ?? '{}')) as {
+      match_status?: 'matched' | 'unmatched';
+      transaction_date?: string;
+      source?: 'intake' | 'client';
+    };
+
+    const docId = uuidv4();
+    const storagePath = saveLeadDocumentFile(
+      String(req.params.id),
+      docId,
+      req.file.originalname,
+      req.file.buffer,
+    );
+
+    const record: DocumentRecord = {
+      id: docId,
+      name: req.file.originalname,
+      match_status: meta.match_status ?? 'unmatched',
+      transaction_date: meta.transaction_date ?? new Date().toISOString().slice(0, 10),
+      uploaded_at: new Date().toISOString(),
+      source: meta.source ?? 'intake',
+      storage_path: storagePath,
+      has_file: true,
+    };
+
+    const field = record.source === 'client' ? 'client_document_records' : 'document_records';
+    const existing = ((lead[field] as DocumentRecord[]) ?? []);
+    const names = [...((lead.documents as string[]) ?? []), record.name];
+    const clientNames =
+      record.source === 'client'
+        ? [...((lead.client_uploaded_docs as string[]) ?? []), record.name]
+        : (lead.client_uploaded_docs as string[]) ?? [];
+
+    const patch: Record<string, unknown> = {
+      [field]: [...existing, record],
+      documents: names,
+      updated_at: new Date().toISOString(),
+      last_interaction: new Date().toISOString().slice(0, 10),
+    };
+    if (record.source === 'client') patch.client_uploaded_docs = clientNames;
+
+    const { data, error } = await sb()
+      .from('leads')
+      .update(patch)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.status(201).json({ document: record, lead: data });
+  } catch (e) { err(res, e); }
+});
+
+router.get('/leads/:leadId/documents/:docId/file', async (req: Request, res: Response) => {
+  try {
+    const lead = await getLead(String(req.params.leadId));
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+    const doc = findDocumentRecord(lead, String(req.params.docId));
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+
+    const buffer = doc.storage_path
+      ? readLeadDocumentFile(doc.storage_path)
+      : null;
+
+    res.setHeader('Content-Disposition', `attachment; filename="${doc.name.replace(/"/g, '')}"`);
+    if (buffer) {
+      res.setHeader('Content-Type', 'application/octet-stream');
+      return res.send(buffer);
+    }
+
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    return res.send(demoDocumentContent(doc.name, doc.transaction_date));
+  } catch (e) { err(res, e); }
+});
+
+router.get('/portal/:token/documents/:docId/file', async (req: Request, res: Response) => {
+  try {
+    const { data: lead, error } = await sb()
+      .from('leads')
+      .select('*')
+      .eq('portal_token', req.params.token)
+      .single();
+    if (error || !lead) return res.status(404).json({ error: 'Invalid portal link' });
+
+    const doc = findDocumentRecord(lead, String(req.params.docId));
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+
+    const buffer = doc.storage_path ? readLeadDocumentFile(doc.storage_path) : null;
+    res.setHeader('Content-Disposition', `attachment; filename="${doc.name.replace(/"/g, '')}"`);
+    if (buffer) {
+      res.setHeader('Content-Type', 'application/octet-stream');
+      return res.send(buffer);
+    }
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    return res.send(demoDocumentContent(doc.name, doc.transaction_date));
   } catch (e) { err(res, e); }
 });
 
@@ -524,6 +652,33 @@ router.post('/activity-log', async (req: Request, res: Response) => {
 async function getLead(id: string) {
   const { data } = await sb().from('leads').select('*').eq('id', id).single();
   return data;
+}
+
+function findDocumentRecord(lead: Record<string, unknown>, docId: string): DocumentRecord | null {
+  const intake = (lead.document_records as DocumentRecord[]) ?? [];
+  const client = (lead.client_document_records as DocumentRecord[]) ?? [];
+  const all = [...intake, ...client];
+  if (all.length) return all.find((d) => d.id === docId) ?? null;
+
+  const legacy = [
+    ...((lead.documents as string[]) ?? []).map((name, i) => ({
+      id: `demo-doc-intake-${i}-${String(name).replace(/\W+/g, '-')}`,
+      name,
+      match_status: (i % 2 === 0 ? 'matched' : 'unmatched') as DocumentRecord['match_status'],
+      transaction_date: new Date().toISOString().slice(0, 10),
+      uploaded_at: new Date().toISOString(),
+      source: 'intake' as const,
+    })),
+    ...((lead.client_uploaded_docs as string[]) ?? []).map((name, i) => ({
+      id: `demo-doc-client-${i}-${String(name).replace(/\W+/g, '-')}`,
+      name,
+      match_status: (i % 2 === 1 ? 'matched' : 'unmatched') as DocumentRecord['match_status'],
+      transaction_date: new Date().toISOString().slice(0, 10),
+      uploaded_at: new Date().toISOString(),
+      source: 'client' as const,
+    })),
+  ];
+  return legacy.find((d) => d.id === docId) ?? null;
 }
 
 export default router;
