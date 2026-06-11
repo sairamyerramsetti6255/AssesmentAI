@@ -14,6 +14,7 @@ export interface ChatRequestBody {
   model?: string;
   reasoning?: boolean;
   stream?: boolean;
+  max_tokens?: number;
 }
 
 export interface ChatCompletionResponse {
@@ -40,6 +41,7 @@ export async function handleChatCompletion(
     model,
     messages,
     stream: false,
+    max_tokens: body.max_tokens ?? 2048,
     ...(body.reasoning ? { reasoning: { enabled: true } } : {}),
   } as Parameters<OpenAI['chat']['completions']['create']>[0])) as ChatCompletion;
 

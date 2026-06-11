@@ -11,6 +11,7 @@ import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import { requireSupabase } from '../lib/supabase.js';
 import { demoDocumentContent, readLeadDocumentFile, saveLeadDocumentFile } from '../lib/documentStore.js';
+import { getClientResponseRows, syncClientResponseRows } from '../lib/clientResponses.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -35,6 +36,18 @@ const OPTIONAL_LEAD_COLUMNS = [
   'client_document_records',
   'proposal_use_cases',
   'proposal_architecture',
+  'proposal_summary',
+  'proposal_next_steps',
+  'proposal_document',
+  'client_assessment_started_at',
+  'client_assessment_submitted_at',
+  'client_assessment_updated_at',
+  'client_email',
+  'client_phone',
+  'available_time',
+  'intake_remarks',
+  'lead_status',
+  'lead_type',
 ] as const;
 
 function formatError(e: unknown): string {
@@ -49,6 +62,12 @@ function err(res: Response, e: unknown, status = 500) {
   const msg = formatError(e);
   console.error('[prototypeData]', e);
   return res.status(status).json({ error: msg });
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isValidUuid(id: unknown): id is string {
+  return typeof id === 'string' && UUID_RE.test(id);
 }
 
 /** Insert lead — retries without optional JSONB columns if migrations 004/005 not applied yet */
@@ -249,11 +268,16 @@ router.post('/leads', async (req: Request, res: Response) => {
     const {
       company_name, industry, domain, country,
       assigned_executive, documents, document_records,
+      client_email, client_phone, available_time,
+      intake_remarks, lead_status, lead_type,
     } = req.body;
     if (!company_name || !industry || !domain) {
       return res.status(400).json({ error: 'company_name, industry, domain required' });
     }
     const today = new Date().toISOString().slice(0, 10);
+    const initialRemarks: string[] = intake_remarks?.trim()
+      ? [intake_remarks.trim()]
+      : [];
     const data = await insertLeadRow({
       id: uuidv4(),
       company_name,
@@ -261,12 +285,18 @@ router.post('/leads', async (req: Request, res: Response) => {
       domain,
       country: country ?? '',
       assigned_executive: assigned_executive ?? '',
+      client_email: client_email ?? '',
+      client_phone: client_phone ?? '',
+      available_time: available_time ?? '',
+      intake_remarks: intake_remarks ?? '',
+      lead_status: lead_status ?? 'new',
+      lead_type: lead_type ?? 'inbound',
       funnel_status: 'intake',
       assessment_status: 'draft',
       research_progress: 0,
       documents: documents ?? [],
       document_records: document_records ?? [],
-      remarks: [],
+      remarks: initialRemarks,
       last_interaction: today,
     });
     res.status(201).json(data);
@@ -323,13 +353,54 @@ router.post('/leads/:id/approve', async (req: Request, res: Response) => {
   } catch (e) { err(res, e); }
 });
 
+// ── reset assessment (delete questions + client responses, back to draft) ─
+
+router.post('/leads/:id/reset-assessment', async (req: Request, res: Response) => {
+  try {
+    const leadId = String(req.params.id);
+    const lead = await getLead(leadId);
+    if (!lead) return res.status(404).json({ error: 'Not found' });
+
+    await sb().from('prototype_questions').delete().eq('lead_id', leadId);
+    await sb().from('prototype_client_responses').delete().eq('lead_id', leadId);
+
+    const { data, error } = await sb()
+      .from('leads')
+      .update({
+        assessment_status: 'draft',
+        portal_token: null,
+        client_progress: 0,
+        client_answers: null,
+        client_richtext: null,
+        client_other_text: null,
+        client_uploaded_docs: null,
+        client_document_records: null,
+        client_assessment_started_at: null,
+        client_assessment_submitted_at: null,
+        client_assessment_updated_at: null,
+        assessment_taxonomy: null,
+        funnel_status: 'review',
+        updated_at: new Date().toISOString(),
+        last_interaction: new Date().toISOString().slice(0, 10),
+      })
+      .eq('id', leadId)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (e) { err(res, e); }
+});
+
 // ── save client answers ───────────────────────────────────────────────────
 
 router.put('/leads/:id/proposal', async (req: Request, res: Response) => {
   try {
-    const { use_cases, architecture } = req.body as {
+    const { use_cases, architecture, summary, next_steps, proposal_document } = req.body as {
       use_cases?: unknown[];
       architecture?: Record<string, string>;
+      summary?: string;
+      next_steps?: string[];
+      proposal_document?: Record<string, unknown>;
     };
     const patch: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
@@ -337,6 +408,9 @@ router.put('/leads/:id/proposal', async (req: Request, res: Response) => {
     };
     if (use_cases !== undefined) patch.proposal_use_cases = use_cases;
     if (architecture !== undefined) patch.proposal_architecture = architecture;
+    if (summary !== undefined) patch.proposal_summary = summary;
+    if (next_steps !== undefined) patch.proposal_next_steps = next_steps;
+    if (proposal_document !== undefined) patch.proposal_document = proposal_document;
 
     const { data, error } = await sb()
       .from('leads')
@@ -351,7 +425,10 @@ router.put('/leads/:id/proposal', async (req: Request, res: Response) => {
 
 router.put('/leads/:id/client-responses', async (req: Request, res: Response) => {
   try {
-    const { answers, richtext, other_text, uploaded_docs, progress } = req.body;
+    const lead = await getLead(String(req.params.id));
+    if (!lead) return res.status(404).json({ error: 'Not found' });
+
+    const { answers, richtext, other_text, uploaded_docs, progress, submitted } = req.body;
     const patch: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
       last_interaction: new Date().toISOString().slice(0, 10),
@@ -376,7 +453,36 @@ router.put('/leads/:id/client-responses', async (req: Request, res: Response) =>
       .select()
       .single();
     if (error) throw error;
+
+    await syncClientResponseRows({
+      leadId: String(req.params.id),
+      answers,
+      richtext,
+      otherText: other_text,
+      progress,
+      submitted: submitted === true,
+      existingStartedAt: (lead as Record<string, unknown>).client_assessment_started_at as string | null,
+    });
+
     res.json(data);
+  } catch (e) { err(res, e); }
+});
+
+router.get('/leads/:leadId/client-responses', async (req: Request, res: Response) => {
+  try {
+    const lead = await getLead(String(req.params.leadId));
+    if (!lead) return res.status(404).json({ error: 'Not found' });
+
+    const rows = await getClientResponseRows(String(req.params.leadId));
+    res.json({
+      lead_id: req.params.leadId,
+      company_name: lead.company_name,
+      client_progress: lead.client_progress,
+      assessment_started_at: (lead as Record<string, unknown>).client_assessment_started_at ?? null,
+      assessment_submitted_at: (lead as Record<string, unknown>).client_assessment_submitted_at ?? null,
+      assessment_updated_at: (lead as Record<string, unknown>).client_assessment_updated_at ?? null,
+      responses: rows,
+    });
   } catch (e) { err(res, e); }
 });
 
@@ -513,7 +619,7 @@ router.put('/portal/:token/client-responses', async (req: Request, res: Response
     const lead = await getLeadByPortalToken(String(req.params.token));
     if (!lead) return res.status(404).json({ error: 'Invalid or expired link' });
 
-    const { answers, richtext, other_text, uploaded_docs, client_document_records, progress } = req.body;
+    const { answers, richtext, other_text, uploaded_docs, client_document_records, progress, submitted } = req.body;
     const patch: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
       last_interaction: new Date().toISOString().slice(0, 10),
@@ -532,6 +638,17 @@ router.put('/portal/:token/client-responses', async (req: Request, res: Response
       .select()
       .single();
     if (error) throw error;
+
+    await syncClientResponseRows({
+      leadId: lead.id as string,
+      answers,
+      richtext,
+      otherText: other_text,
+      progress,
+      submitted: submitted === true,
+      existingStartedAt: (lead as Record<string, unknown>).client_assessment_started_at as string | null,
+    });
+
     res.json(data);
   } catch (e) { err(res, e); }
 });
@@ -614,7 +731,7 @@ router.put('/leads/:leadId/questions', async (req: Request, res: Response) => {
 
     if (questions.length > 0) {
       const rows = questions.map((q, i) => ({
-        id: (q.id as string) || uuidv4(),
+        id: isValidUuid(q.id) ? q.id : uuidv4(),
         lead_id: req.params.leadId,
         sort_order: typeof q.sort_order === 'number' ? q.sort_order : i,
         taxonomy_pillar: q.taxonomy_pillar ?? q.taxonomyPillar ?? 'Technical Pain Points',

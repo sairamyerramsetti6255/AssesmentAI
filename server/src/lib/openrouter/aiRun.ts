@@ -23,12 +23,30 @@ export interface ResearchResult {
   executiveBrief: string
 }
 
+function extractAssistantText(res: { content: string | null; reasoning_details?: unknown }): string {
+  if (res.content?.trim()) return res.content
+
+  if (!Array.isArray(res.reasoning_details)) return ''
+
+  const reasoningText = res.reasoning_details
+    .map((detail) => {
+      if (typeof detail !== 'object' || detail === null || !('text' in detail)) return ''
+      const text = (detail as { text?: unknown }).text
+      return typeof text === 'string' ? text : ''
+    })
+    .filter(Boolean)
+    .join('\n')
+
+  const jsonMatch = reasoningText.match(/\{[\s\S]*\}/)
+  return jsonMatch?.[0] ?? reasoningText
+}
+
 async function complete(
   client: OpenAI,
   config: OpenRouterConfig,
   system: string,
   user: string,
-  options?: { reasoning?: boolean },
+  options?: { reasoning?: boolean; max_tokens?: number },
 ): Promise<string> {
   const res = await handleChatCompletion(client, config, {
     messages: [
@@ -36,8 +54,9 @@ async function complete(
       { role: 'user', content: user },
     ],
     reasoning: options?.reasoning ?? false,
+    max_tokens: options?.max_tokens,
   })
-  return res.content ?? ''
+  return extractAssistantText(res)
 }
 
 export async function runResearchPipeline(
@@ -313,6 +332,40 @@ For slider use 1-10, rating 1-5, multiselect MUST use exact strings from that qu
   return parseJsonFromLlm<{ answers: Record<string, string | number | string[]>; richtext: Record<string, string> }>(raw)
 }
 
+export type ProposalCapability = {
+  title: string
+  intro: string
+  bullets: string[]
+}
+
+export type ProposalPhase = {
+  title: string
+  period: string
+  activities: string[]
+}
+
+export type ProposalDocumentPayload = {
+  solutionName: string
+  executiveSummary: string
+  businessChallenge: string
+  businessChallengePoints: string[]
+  proposedSolution: string
+  proposedSolutionPoints: string[]
+  strategicObjectives: string[]
+  mrpApproach: string
+  mrpBenefits: string[]
+  mrpWorkflowFocus: string
+  functionalCapabilities: ProposalCapability[]
+  securityPrinciples: string[]
+  governancePrinciples: string[]
+  implementationPhases: ProposalPhase[]
+  expectedOutcomes: string[]
+  successIndicators: string[]
+  futureEnhancements: string[]
+  discussionItems: string[]
+  closingStatement: string
+}
+
 export async function generateProposalContent(
   client: OpenAI,
   config: OpenRouterConfig,
@@ -320,27 +373,148 @@ export async function generateProposalContent(
   research: ResearchResult,
   clientAnswersSummary: string,
 ): Promise<{
+  summary: string
+  nextSteps: string[]
   useCases: { gap: string; solution: string; horizon: 'pilot' | 'long_term'; impact: 'high' | 'medium' }[]
   architecture: { hosting: string; pipelines: string; access: string; security: string }
+  document: ProposalDocumentPayload
 }> {
-  const user = `Based on discovery for ${lead.companyName}:
+  const user = `Draft a PBS-style "Executive Solution Overview & Scope of Work" for ${lead.companyName} (${lead.industry}, ${lead.country}).
 
-Brief: ${research.executiveBrief.slice(0, 1200)}
-Client answers summary: ${clientAnswersSummary}
+Prepared by Proficient Business Service Ltd. (PBS). Follow the Genesis Watch AI scope-of-work structure: executive summary, business challenge, proposed solution, MRP approach, functional capabilities, security/governance, 4-week implementation timeline, outcomes, and closing.
+
+DISCOVERY BRIEF:
+${research.executiveBrief.slice(0, 2000)}
+
+WEB INSIGHTS: ${research.webInsights.join(' | ')}
+COMPETITORS: ${research.competitors.join(' | ')}
+
+FULL CLIENT ASSESSMENT RESPONSES (read every answer before proposing):
+${clientAnswersSummary.slice(0, 12000)}
 
 Return JSON only:
 {
-  "useCases":[{"gap":"...","solution":"...","horizon":"pilot|long_term","impact":"high|medium"}],
-  "architecture":{"hosting":"...","pipelines":"...","access":"...","security":"..."}
+  "document": {
+    "solutionName": "${lead.companyName} AI or similar branded solution name",
+    "executiveSummary": "3-5 paragraphs referencing specific client answers",
+    "businessChallenge": "2-3 sentences on operational context",
+    "businessChallengePoints": ["5-8 specific pain points from client answers"],
+    "proposedSolution": "2-3 sentences overview",
+    "proposedSolutionPoints": ["5-7 capability bullets"],
+    "strategicObjectives": ["5-6 objectives"],
+    "mrpApproach": "2-3 sentences on Minimum Remarkable Product",
+    "mrpBenefits": ["4-5 MRP benefits"],
+    "mrpWorkflowFocus": "Detect → Prioritize → Escalate → Validate → Track (adapt to client)",
+    "functionalCapabilities": [
+      {"title":"Capability name","intro":"1-2 sentences","bullets":["3-5 feature bullets"]}
+    ],
+    "securityPrinciples": ["5-7 security principles"],
+    "governancePrinciples": ["4-6 governance principles"],
+    "implementationPhases": [
+      {"title":"Phase 1 — Discovery & Workflow Alignment","period":"Week 1","activities":["4 activities"]},
+      {"title":"Phase 2 — Core Platform Development","period":"Week 2","activities":["4 activities"]},
+      {"title":"Phase 3 — Escalation & Validation Workflows","period":"Week 3","activities":["4 activities"]},
+      {"title":"Phase 4 — Testing, Pilot & Validation","period":"Week 4","activities":["4 activities"]}
+    ],
+    "expectedOutcomes": ["5-7 outcomes after MRP"],
+    "successIndicators": ["6-8 measurable KPIs"],
+    "futureEnhancements": ["4-6 future options"],
+    "discussionItems": ["6-8 executive alignment topics"],
+    "closingStatement": "Professional closing referencing PBS collaboration with ${lead.companyName}"
+  },
+  "summary": "same as document.executiveSummary first paragraph",
+  "nextSteps": ["from discussionItems or implementation kickoff steps"],
+  "useCases": [
+    {"gap":"specific pain","solution":"concrete AI capability","horizon":"pilot|long_term","impact":"high|medium"}
+  ],
+  "architecture": {
+    "hosting": "2-3 sentences",
+    "pipelines": "2-3 sentences",
+    "access": "2-3 sentences",
+    "security": "2-3 sentences"
+  }
 }
-Provide 3 useCases.`
+Provide exactly 4 useCases and 4 functionalCapabilities grounded in client responses. Keep each string under 2 sentences. Be specific — no generic filler. Return one complete JSON object — no markdown fences.`
 
-  const raw = await complete(
-    client,
-    config,
-    'You draft AI deployment blueprints for enterprise clients. JSON only.',
-    user,
-  )
+  const system =
+    'You are a senior AI strategy consultant at Proficient Business Service Ltd. (PBS) writing client-ready scope-of-work documents. Respond with valid JSON only — no prose, no code fences.'
 
-  return parseJsonFromLlm(raw)
+  type ProposalParseResult = {
+    summary?: string
+    nextSteps?: string[]
+    useCases: { gap: string; solution: string; horizon: 'pilot' | 'long_term'; impact: 'high' | 'medium' }[]
+    architecture: { hosting: string; pipelines: string; access: string; security: string }
+    document?: ProposalDocumentPayload
+  }
+
+  const parseProposalJson = async (prompt: string): Promise<ProposalParseResult> => {
+    const raw = await complete(client, config, system, prompt, { max_tokens: 12000 })
+    return parseJsonFromLlm<ProposalParseResult>(raw)
+  }
+
+  let parsed: ProposalParseResult
+  try {
+    parsed = await parseProposalJson(user)
+  } catch {
+    const concise = `${user}
+
+CRITICAL: Previous response was truncated. Return valid complete JSON. Limit every array to 4 items max. Keep paragraphs to 1-2 sentences.`
+    parsed = await parseProposalJson(concise)
+  }
+
+  const doc = parsed.document ?? buildFallbackProposalDocument(lead, parsed)
+
+  return {
+    summary: parsed.summary ?? doc.executiveSummary,
+    nextSteps: parsed.nextSteps ?? doc.discussionItems?.slice(0, 6) ?? ['Schedule executive readout'],
+    useCases: parsed.useCases ?? [],
+    architecture: parsed.architecture ?? {
+      hosting: doc.securityPrinciples?.[0] ?? 'Private deployment architecture',
+      pipelines: 'Configured data ingestion and AI classification pipelines',
+      access: doc.governancePrinciples?.[0] ?? 'Role-based access controls with human validation',
+      security: doc.securityPrinciples?.join('; ') ?? 'Controlled data handling with full auditability',
+    },
+    document: doc,
+  }
+}
+
+function buildFallbackProposalDocument(
+  lead: LeadPayload,
+  parsed: {
+    summary?: string
+    useCases?: { gap: string; solution: string }[]
+    architecture?: { hosting?: string; security?: string; access?: string }
+  },
+): ProposalDocumentPayload {
+  const useCases = parsed.useCases ?? []
+  return {
+    solutionName: `${lead.companyName} AI`,
+    executiveSummary: parsed.summary ?? `AI readiness blueprint for ${lead.companyName}.`,
+    businessChallenge: `${lead.companyName} operates in ${lead.industry} where manual processes create operational risk and limited visibility.`,
+    businessChallengePoints: useCases.map((u) => u.gap),
+    proposedSolution: `An AI-assisted platform for ${lead.companyName} focused on governed operational intelligence.`,
+    proposedSolutionPoints: useCases.map((u) => u.solution),
+    strategicObjectives: ['Improve operational visibility', 'Reduce manual triage', 'Maintain human oversight'],
+    mrpApproach: 'Delivered as a Minimum Remarkable Product for rapid validation.',
+    mrpBenefits: ['Rapid validation', 'Reduced complexity', 'Early governance'],
+    mrpWorkflowFocus: 'Detect → Prioritize → Escalate → Validate → Track',
+    functionalCapabilities: useCases.map((u) => ({
+      title: u.gap,
+      intro: u.solution,
+      bullets: ['Configured for client environment', 'Human validation required'],
+    })),
+    securityPrinciples: [parsed.architecture?.security ?? 'Private deployment', 'Role-based access'],
+    governancePrinciples: [parsed.architecture?.access ?? 'Human validation mandatory'],
+    implementationPhases: [
+      { title: 'Phase 1 — Discovery', period: 'Week 1', activities: ['Align workflows'] },
+      { title: 'Phase 2 — Development', period: 'Week 2', activities: ['Build core platform'] },
+      { title: 'Phase 3 — Workflows', period: 'Week 3', activities: ['Configure escalation'] },
+      { title: 'Phase 4 — Pilot', period: 'Week 4', activities: ['Test and validate'] },
+    ],
+    expectedOutcomes: ['Functional AI-assisted platform', 'Improved visibility'],
+    successIndicators: ['High classification accuracy', 'Positive user adoption'],
+    futureEnhancements: ['Expanded integrations', 'Advanced analytics'],
+    discussionItems: ['Workflow priorities', 'Security preferences'],
+    closingStatement: `PBS looks forward to collaborating with ${lead.companyName} on implementation.`,
+  }
 }
