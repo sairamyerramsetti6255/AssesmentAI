@@ -45,3 +45,16 @@ export function getOpenRouterJsonModel(): string {
 export function isReasoningModel(model: string): boolean {
   return /reasoning|\/think/i.test(model);
 }
+
+export class OpenRouterRateLimitError extends Error {
+  readonly status = 429 as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'OpenRouterRateLimitError';
+  }
+}
+
+export function isRateLimitMessage(message: string): boolean {
+  return /rate limit|429|free-models-per-day/i.test(message);
+}

@@ -1,9 +1,17 @@
 import { Router } from 'express';
-import { createOpenRouterClient, getOpenRouterConfigFromEnv, } from '../lib/openrouter/openrouterClient.js';
+import { createOpenRouterClient, getOpenRouterConfigFromEnv, isRateLimitMessage, OpenRouterRateLimitError, } from '../lib/openrouter/openrouterClient.js';
 import { generateAssessmentQuestions, generateDemoClientAnswers, generateProposalContent, rewriteAssessmentQuestion, runResearchPipeline, } from '../lib/openrouter/aiRun.js';
 import { scrapeWebsite } from '../lib/openrouter/scrape.js';
 import { handleChatCompletion, handleChatStream, } from '../lib/openrouter/chatHandlers.js';
 const router = Router();
+function sendAiError(res, err, fallback) {
+    const message = err instanceof Error ? err.message : fallback;
+    const rateLimited = err instanceof OpenRouterRateLimitError || isRateLimitMessage(message);
+    res.status(rateLimited ? 429 : 500).json({
+        error: message,
+        code: rateLimited ? 'rate_limit' : 'ai_error',
+    });
+}
 function requireOpenRouter(_req, res) {
     const config = getOpenRouterConfigFromEnv();
     if (!config) {
@@ -34,7 +42,7 @@ router.post('/research/pipeline', async (req, res) => {
         res.json(result);
     }
     catch (err) {
-        res.status(500).json({ error: err instanceof Error ? err.message : 'Research failed' });
+        sendAiError(res, err, 'Research failed');
     }
 });
 router.post('/research/scrape', async (req, res) => {
@@ -58,7 +66,7 @@ router.post('/assessment/generate-questions', async (req, res) => {
         res.json(generated);
     }
     catch (err) {
-        res.status(500).json({ error: err instanceof Error ? err.message : 'Question generation failed' });
+        sendAiError(res, err, 'Question generation failed');
     }
 });
 router.post('/assessment/rewrite-question', async (req, res) => {
@@ -72,7 +80,7 @@ router.post('/assessment/rewrite-question', async (req, res) => {
         res.json({ question: rewritten });
     }
     catch (err) {
-        res.status(500).json({ error: err instanceof Error ? err.message : 'Rewrite failed' });
+        sendAiError(res, err, 'Rewrite failed');
     }
 });
 router.post('/assessment/generate-demo-answers', async (req, res) => {
@@ -86,7 +94,7 @@ router.post('/assessment/generate-demo-answers', async (req, res) => {
         res.json(generated);
     }
     catch (err) {
-        res.status(500).json({ error: err instanceof Error ? err.message : 'Demo answers failed' });
+        sendAiError(res, err, 'Demo answers failed');
     }
 });
 router.post('/assessment/generate-proposal', async (req, res) => {
@@ -100,7 +108,7 @@ router.post('/assessment/generate-proposal', async (req, res) => {
         res.json(proposal);
     }
     catch (err) {
-        res.status(500).json({ error: err instanceof Error ? err.message : 'Proposal generation failed' });
+        sendAiError(res, err, 'Proposal generation failed');
     }
 });
 router.post('/chat/completions/stream', async (req, res) => {

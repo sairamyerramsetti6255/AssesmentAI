@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import {
   createOpenRouterClient,
   getOpenRouterConfigFromEnv,
+  isRateLimitMessage,
+  OpenRouterRateLimitError,
 } from '../lib/openrouter/openrouterClient.js';
 import {
   generateAssessmentQuestions,
@@ -22,6 +24,16 @@ import {
 } from '../lib/openrouter/chatHandlers.js';
 
 const router = Router();
+
+function sendAiError(res: Response, err: unknown, fallback: string) {
+  const message = err instanceof Error ? err.message : fallback;
+  const rateLimited =
+    err instanceof OpenRouterRateLimitError || isRateLimitMessage(message);
+  res.status(rateLimited ? 429 : 500).json({
+    error: message,
+    code: rateLimited ? 'rate_limit' : 'ai_error',
+  });
+}
 
 function requireOpenRouter(_req: Request, res: Response): ReturnType<typeof getOpenRouterConfigFromEnv> {
   const config = getOpenRouterConfigFromEnv();
@@ -53,7 +65,7 @@ router.post('/research/pipeline', async (req, res) => {
     const result = await runResearchPipeline(client, config, lead);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : 'Research failed' });
+    sendAiError(res, err, 'Research failed');
   }
 });
 
@@ -76,7 +88,7 @@ router.post('/assessment/generate-questions', async (req, res) => {
     const generated = await generateAssessmentQuestions(client, config, lead, research);
     res.json(generated);
   } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : 'Question generation failed' });
+    sendAiError(res, err, 'Question generation failed');
   }
 });
 
@@ -103,7 +115,7 @@ router.post('/assessment/rewrite-question', async (req, res) => {
     );
     res.json({ question: rewritten });
   } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : 'Rewrite failed' });
+    sendAiError(res, err, 'Rewrite failed');
   }
 });
 
@@ -120,7 +132,7 @@ router.post('/assessment/generate-demo-answers', async (req, res) => {
     const generated = await generateDemoClientAnswers(client, config, lead, questions, research);
     res.json(generated);
   } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : 'Demo answers failed' });
+    sendAiError(res, err, 'Demo answers failed');
   }
 });
 
@@ -137,7 +149,7 @@ router.post('/assessment/generate-proposal', async (req, res) => {
     const proposal = await generateProposalContent(client, config, lead, research, clientAnswersSummary);
     res.json(proposal);
   } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : 'Proposal generation failed' });
+    sendAiError(res, err, 'Proposal generation failed');
   }
 });
 

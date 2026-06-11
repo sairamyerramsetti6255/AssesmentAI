@@ -33,3 +33,13 @@ export function getOpenRouterJsonModel() {
 export function isReasoningModel(model) {
     return /reasoning|\/think/i.test(model);
 }
+export class OpenRouterRateLimitError extends Error {
+    status = 429;
+    constructor(message) {
+        super(message);
+        this.name = 'OpenRouterRateLimitError';
+    }
+}
+export function isRateLimitMessage(message) {
+    return /rate limit|429|free-models-per-day/i.test(message);
+}

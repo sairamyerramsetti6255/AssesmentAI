@@ -32,12 +32,20 @@ server/
 ### `.env` (important)
 
 ```env
-SERVE_CLIENT=true
-CLIENT_URL=https://YOUR-DOMAIN
+SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+SUPABASE_ANON_KEY=eyJ...
+SUPABASE_SERVICE_ROLE_KEY=eyJ...
+
+OPENROUTER_API_KEY=sk-or-v1-...
+OPENROUTER_MODEL=nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
 OPENROUTER_SITE_URL=https://YOUR-DOMAIN
-# …plus Supabase + OpenRouter keys
+OPENROUTER_APP_NAME=AI Readiness Assessment
+CLIENT_URL=https://YOUR-DOMAIN
+SERVE_CLIENT=true
 PORT=3001
 ```
+
+Without `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`, `/api/proto/auth/login` returns **500**.
 
 Do **not** set `SERVE_CLIENT=false` for this option — that disables the UI and causes **404 on page refresh**.
 

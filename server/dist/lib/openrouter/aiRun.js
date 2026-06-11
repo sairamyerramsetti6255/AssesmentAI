@@ -1,5 +1,6 @@
 import { APIError } from 'openai';
-import { getOpenRouterJsonModel, isReasoningModel } from './openrouterClient.js';
+import { getOpenRouterJsonModel, isReasoningModel, isRateLimitMessage, OpenRouterRateLimitError, } from './openrouterClient.js';
+import { geminiGenerateText, isGeminiConfigured, parseGeminiJson } from '../gemini.js';
 import { handleChatCompletion } from './chatHandlers.js';
 import { extractFirstJsonBlock, parseJsonFromLlm } from './parseJson.js';
 import { scrapeWebsite } from './scrape.js';
@@ -40,15 +41,38 @@ function jsonReasoningForModel(model) {
         return undefined;
     return { effort: 'low' };
 }
+const RATE_LIMIT_MSG = 'OpenRouter free model daily limit reached (50/day). Add $10 credits at openrouter.ai/settings/credits for 1000/day, or wait for reset.';
 function wrapOpenRouterError(err) {
     if (err instanceof APIError) {
         if (err.status === 429) {
-            throw new Error('OpenRouter free model daily limit reached — wait until reset or add credits at openrouter.ai/settings/credits');
+            throw new OpenRouterRateLimitError(RATE_LIMIT_MSG);
         }
         const msg = err.error?.message ?? err.message;
         throw new Error(`OpenRouter API error (${err.status}): ${msg}`);
     }
     throw err;
+}
+function geminiFallbackEnabled() {
+    if (process.env.AI_GEMINI_FALLBACK === 'false')
+        return false;
+    return isGeminiConfigured();
+}
+function isRateLimitError(err) {
+    if (err instanceof OpenRouterRateLimitError)
+        return true;
+    if (err instanceof APIError && err.status === 429)
+        return true;
+    if (err instanceof Error && isRateLimitMessage(err.message))
+        return true;
+    return false;
+}
+async function completeJsonViaGemini(system, user) {
+    const text = await geminiGenerateText(`${system}\n\n${user}`, {
+        json: true,
+        maxOutputTokens: 16384,
+        temperature: 0.3,
+    });
+    return parseGeminiJson(text);
 }
 async function complete(client, config, system, user, options) {
     const model = options?.model ?? config.model;
@@ -101,6 +125,15 @@ async function completeJson(client, config, system, user, options) {
                 return parseJsonFromLlm(raw);
             }
             catch (err) {
+                if (isRateLimitError(err)) {
+                    if (geminiFallbackEnabled()) {
+                        console.warn('[ai] OpenRouter rate limited — using Gemini fallback');
+                        return completeJsonViaGemini(jsonSystem, prompt);
+                    }
+                    throw err instanceof OpenRouterRateLimitError
+                        ? err
+                        : new OpenRouterRateLimitError(RATE_LIMIT_MSG);
+                }
                 lastErr = err instanceof Error ? err : new SyntaxError(String(err));
                 console.warn(`[openrouter] JSON parse failed (${model}): ${lastErr.message}`);
             }
@@ -193,46 +226,38 @@ function normalizeGeneratedQuestion(q) {
     }
     return { ...q, type, options };
 }
-const TAXONOMY_SYSTEM = `You are a Domain-Agnostic AI & Process Architect. Given client context, produce assessment taxonomy buckets as JSON only.`;
 export async function generateAssessmentQuestions(client, config, lead, research) {
     const userDomain = `${lead.industry} — ${lead.companyName} (${lead.country})`;
-    const context = `Company: ${lead.companyName} (${lead.industry}, ${lead.country})
-Domain: ${lead.domain}
-Brief: ${research.executiveBrief.slice(0, 2500)}
-Web: ${research.webInsights.slice(0, 6).join('; ')}
-Docs: ${research.documentInsights.slice(0, 5).join('; ')}`;
-    const taxParsed = await completeJson(client, config, TAXONOMY_SYSTEM, `${context}
+    const user = `[User Domain]: ${userDomain}
 
-Return JSON only:
-{"userDomain":"${userDomain}","taxonomy":{"technicalPainPoints":["4-5 items"],"operationalPainAreas":["4-5 items"],"processImprovements":["4-5 items"]}}`, { max_tokens: 8000 });
-    const taxonomy = {
-        technicalPainPoints: taxParsed.taxonomy?.technicalPainPoints ?? [],
-        operationalPainAreas: taxParsed.taxonomy?.operationalPainAreas ?? [],
-        processImprovements: taxParsed.taxonomy?.processImprovements ?? [],
-    };
-    const questionsUser = `[User Domain]: ${userDomain}
+Company domain/URL: ${lead.domain}
+Research brief:
+${research.executiveBrief.slice(0, 2500)}
 
-${context}
+Web insights: ${research.webInsights.slice(0, 8).join('; ')}
+Competitors: ${research.competitors.slice(0, 5).join('; ')}
+Document themes: ${research.documentInsights.slice(0, 5).join('; ')}
 
-Taxonomy:
-${JSON.stringify(taxonomy)}
-
-Generate exactly 10 assessment questions mapped to taxonomy pillars.
-"options" = client-facing choices (4-5 per choice question). Do NOT include "Other".
-"suggestedOptions" = 2 executive-only extras.
-Keep labels short. Return JSON only:
-{"questions":[{"taxonomyPillar":"Technical Pain Points|Non-Technical / Operational Pain Areas|Process Improvements","domainContext":"string","text":"string","type":"singlechoice|multichoice|scale|text","options":[],"suggestedOptions":[],"sortOrder":0}]}`;
-    const qParsed = await completeJson(client, config, ASSESSMENT_ARCHITECT_SYSTEM, questionsUser, {
+Populate taxonomy + generate exactly 10 assessment questions in one JSON object.
+"options" = client-facing choices (4-5 each). Do NOT include "Other".
+Keep option labels short (under 8 words).`;
+    const parsed = await completeJson(client, config, ASSESSMENT_ARCHITECT_SYSTEM, user, {
         max_tokens: 32000,
-        concisePrompt: `${questionsUser}\n\nCRITICAL: Return {"questions":[...]} with exactly 8 questions. Max 4 options each.`,
+        model: getOpenRouterJsonModel(),
+        concisePrompt: `${user}\n\nCRITICAL: Return complete JSON with taxonomy + exactly 8 questions. Max 4 options per question.`,
     });
-    const questions = (qParsed.questions ?? []).map((q, i) => normalizeGeneratedQuestion({
+    const questions = (parsed.questions ?? []).map((q, i) => normalizeGeneratedQuestion({
         ...q,
         sortOrder: q.sortOrder ?? i,
     }));
+    const tax = parsed.taxonomy;
     return {
-        userDomain: taxParsed.userDomain ?? userDomain,
-        taxonomy,
+        userDomain: parsed.userDomain ?? userDomain,
+        taxonomy: {
+            technicalPainPoints: tax?.technicalPainPoints ?? [],
+            operationalPainAreas: tax?.operationalPainAreas ?? [],
+            processImprovements: tax?.processImprovements ?? [],
+        },
         questions,
     };
 }
