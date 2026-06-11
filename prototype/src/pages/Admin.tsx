@@ -24,12 +24,8 @@ export function Admin() {
     <div>
       <PageHeader
         title="Admin Panel"
-        description="Manage users and master data. Mandatory questions are always included in every assessment."
+        description="Manage users and master data in Supabase. Mandatory questions are always included in every assessment."
       />
-
-      <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm font-medium text-amber-900">
-        Demo mode — changes are stored in this session only
-      </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <AdminUserPanel

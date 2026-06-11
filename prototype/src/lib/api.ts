@@ -14,6 +14,8 @@ import type {
   MasterDataCategory,
   ActivityLogEntry,
   UserRole,
+  DriverHeatmap,
+  UseCase,
 } from '../types'
 
 // ── Auth token storage ────────────────────────────────────────────────────
@@ -71,7 +73,7 @@ export async function getMe(): Promise<PlatformUser> {
 // ═════════════════════════════════════════════════════════════════════════
 
 export function getUsers(): Promise<PlatformUser[]> {
-  return request('/api/proto/users')
+  return request<Record<string, unknown>[]>('/api/proto/users').then((rows) => rows.map(dbToUser))
 }
 
 export function createUser(u: Omit<PlatformUser, 'id'>): Promise<PlatformUser> {
@@ -214,8 +216,67 @@ export function addRemark(id: string, text: string): Promise<Lead> {
   return request(`/api/proto/leads/${id}/remarks`, { method: 'POST', body: JSON.stringify({ text }) })
 }
 
-export function getPortalData(token: string): Promise<{ lead: Lead; questions: AssessmentQuestion[] }> {
-  return request(`/api/proto/portal/${token}`)
+export async function getPortalData(token: string): Promise<{ lead: Lead; questions: AssessmentQuestion[] }> {
+  const raw = await request<{ lead: DbLead; questions: Record<string, unknown>[] }>(`/api/proto/portal/${token}`)
+  return {
+    lead: dbToLead(raw.lead),
+    questions: raw.questions.map(dbToQuestion),
+  }
+}
+
+export function savePortalResponses(
+  token: string,
+  answers: Record<string, unknown>,
+  richtext: Record<string, string>,
+  progress: number,
+  extras?: {
+    otherText?: Record<string, string>
+    uploadedDocuments?: LeadDocument[]
+  },
+): Promise<Lead> {
+  return request(`/api/proto/portal/${token}/client-responses`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      answers,
+      richtext,
+      progress,
+      other_text: extras?.otherText,
+      uploaded_docs: extras?.uploadedDocuments?.map((d) => d.name),
+      client_document_records: extras?.uploadedDocuments?.map(dbFromLeadDocument),
+    }),
+  }).then((r) => dbToLead(r as unknown as DbLead))
+}
+
+export function saveProposal(
+  leadId: string,
+  useCases: UseCase[],
+  architecture: Lead['proposalArchitecture'],
+): Promise<Lead> {
+  return request(`/api/proto/leads/${leadId}/proposal`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      use_cases: useCases.map((uc) => ({
+        id: uc.id,
+        gap: uc.gap,
+        solution: uc.solution,
+        horizon: uc.horizon,
+        impact: uc.impact,
+      })),
+      architecture,
+    }),
+  }).then((r) => dbToLead(r as unknown as DbLead))
+}
+
+export function getDriverHeatmap(): Promise<DriverHeatmap[]> {
+  return request('/api/proto/analytics/driver-heatmap')
+}
+
+export function getAnalyticsSummary(): Promise<{
+  avg_velocity_days: number
+  active_pipeline: number
+  portal_live: number
+}> {
+  return request('/api/proto/analytics/summary')
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -299,7 +360,9 @@ export function deleteMasterDataItem(category: MasterDataCategory, name: string)
 
 export function getActivityLog(leadId?: string): Promise<ActivityLogEntry[]> {
   const qs = leadId ? `?lead_id=${leadId}` : ''
-  return request(`/api/proto/activity-log${qs}`)
+  return request<Record<string, unknown>[]>(`/api/proto/activity-log${qs}`).then((rows) =>
+    rows.map(dbToActivity),
+  )
 }
 
 export function logActivity(
@@ -307,7 +370,7 @@ export function logActivity(
   summary: string,
   extra?: { leadId?: string; companyName?: string; actorName?: string; actorRole?: UserRole },
 ): Promise<ActivityLogEntry> {
-  return request('/api/proto/activity-log', {
+  return request<Record<string, unknown>>('/api/proto/activity-log', {
     method: 'POST',
     body: JSON.stringify({
       kind,
@@ -317,7 +380,7 @@ export function logActivity(
       lead_id: extra?.leadId,
       company_name: extra?.companyName,
     }),
-  })
+  }).then(dbToActivity)
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -347,6 +410,8 @@ export interface DbLead {
   client_document_records?: Array<Record<string, unknown>>
   ai_research?: Record<string, unknown>
   assessment_taxonomy?: Record<string, unknown>
+  proposal_use_cases?: Array<Record<string, unknown>>
+  proposal_architecture?: Record<string, string>
   last_interaction: string
   created_at: string
   updated_at: string
@@ -406,6 +471,8 @@ export function dbToLead(r: DbLead): Lead {
     clientUploadedDocuments: clientRecords,
     aiResearch: r.ai_research as Lead['aiResearch'],
     assessmentTaxonomy: r.assessment_taxonomy as Lead['assessmentTaxonomy'],
+    proposalUseCases: (r.proposal_use_cases as UseCase[] | undefined) ?? undefined,
+    proposalArchitecture: r.proposal_architecture as Lead['proposalArchitecture'],
     lastInteraction: r.last_interaction,
     createdAt: r.created_at?.slice(0, 10) ?? '',
   }
@@ -424,6 +491,29 @@ export function dbToQuestion(r: Record<string, unknown>): AssessmentQuestion {
     options: (r.options as string[]) ?? [],
     suggestedOptions: (r.suggested_options as string[]) ?? [],
     isMandatory: (r.is_mandatory as boolean) ?? false,
+  }
+}
+
+export function dbToUser(r: Record<string, unknown>): PlatformUser {
+  return {
+    id: r.id as string,
+    name: r.name as string,
+    email: r.email as string,
+    role: r.role as PlatformUser['role'],
+    lastLogin: (r.last_login as string) ?? undefined,
+  }
+}
+
+export function dbToActivity(r: Record<string, unknown>): ActivityLogEntry {
+  return {
+    id: r.id as string,
+    at: (r.created_at as string) ?? new Date().toISOString(),
+    kind: r.kind as ActivityLogEntry['kind'],
+    actorName: (r.actor_name as string) ?? 'System',
+    actorRole: (r.actor_role as ActivityLogEntry['actorRole']) ?? 'account_executive',
+    summary: (r.summary as string) ?? '',
+    leadId: (r.lead_id as string) ?? undefined,
+    companyName: (r.company_name as string) ?? undefined,
   }
 }
 

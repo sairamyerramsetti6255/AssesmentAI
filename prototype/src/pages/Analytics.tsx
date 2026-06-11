@@ -1,11 +1,14 @@
 import { useApp } from '../context/AppContext'
-import { executives } from '../data/mock'
 import { Badge, Card, PageHeader, StatCard } from '../components/ui'
 
 export function Analytics() {
-  const { leads } = useApp()
+  const { leads, platformUsers } = useApp()
   const allRemarks = leads.flatMap((l) =>
     l.remarks.map((r) => ({ company: l.companyName, executive: l.assignedExecutive, text: r })),
+  )
+
+  const executives = platformUsers.filter((u) =>
+    ['account_executive', 'team_lead', 'super_admin'].includes(u.role),
   )
 
   return (
@@ -79,12 +82,14 @@ export function Analytics() {
             {executives.map((ex) => {
               const exLeads = leads.filter((l) => l.assignedExecutive === ex.name)
               const approved = exLeads.filter((l) => l.assessmentStatus === 'approved').length
+              const converted = exLeads.filter((l) => l.funnelStatus === 'converted').length
+              const conversionRate = exLeads.length ? converted / exLeads.length : 0
               return (
                 <div key={ex.id}>
                   <div className="mb-1 flex justify-between text-sm">
                     <span className="font-medium">{ex.name}</span>
                     <span className="text-slate-500">
-                      {exLeads.length} leads · {Math.round(ex.conversionRate * 100)}% conv.
+                      {exLeads.length} leads · {Math.round(conversionRate * 100)}% conv.
                     </span>
                   </div>
                   <div className="h-2 rounded-full bg-slate-100">
@@ -94,7 +99,7 @@ export function Analytics() {
                     />
                   </div>
                   <p className="mt-1 text-xs text-slate-500">
-                    {approved} approved assessments · ~11d avg. velocity (demo)
+                    {approved} approved assessments
                   </p>
                 </div>
               )

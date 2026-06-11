@@ -2,13 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
 import { ClientPortalThankYou } from '../components/ClientPortalThankYou'
-import { QuestionAnswerInput, type AnswerState } from '../components/QuestionAnswerInput'
-import { getClientTestData } from '../data/testData'
-import { sortQuestions } from '../lib/questions'
 import { UploadedDocumentsTable } from '../components/UploadedDocumentsTable'
+import { QuestionAnswerInput, type AnswerState } from '../components/QuestionAnswerInput'
 import * as api from '../lib/api'
 import { documentFromFile } from '../lib/documents'
-import type { LeadDocument } from '../types'
+import type { AssessmentQuestion, Lead, LeadDocument } from '../types'
+import { sortQuestions } from '../lib/questions'
 import { Badge, Button, ProgressBar } from '../components/ui'
 
 function countAnswered(
@@ -34,12 +33,14 @@ export function ClientPortal() {
   const { token } = useParams()
   const [searchParams] = useSearchParams()
   const onBehalf = searchParams.get('onbehalf') === '1'
-  const { leads, questions, saveClientResponses, currentUser, logActivity } = useApp()
-  const lead =
-    leads.find((l) => l.portalToken === token) ??
-    leads.find((l) => l.funnelStatus === 'client_portal')
+  const { saveClientResponses, currentUser, logActivity } = useApp()
 
-  const orderedQuestions = useMemo(() => sortQuestions(questions), [questions])
+  const [portalLead, setPortalLead] = useState<Lead | null>(null)
+  const [portalQuestions, setPortalQuestions] = useState<AssessmentQuestion[]>([])
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [loadingPortal, setLoadingPortal] = useState(true)
+
+  const orderedQuestions = useMemo(() => sortQuestions(portalQuestions), [portalQuestions])
   const [step, setStep] = useState(0)
   const [submitted, setSubmitted] = useState(false)
   const [answers, setAnswers] = useState<Record<string, string | number | string[]>>({})
@@ -52,23 +53,31 @@ export function ClientPortal() {
   const answerState: AnswerState = { answers, otherText, richtext }
 
   useEffect(() => {
-    if (lead?.clientProgress === 100 && lead.clientAnswers) {
-      setSubmitted(true)
+    if (!token) {
+      setLoadError('Invalid portal link.')
+      setLoadingPortal(false)
+      return
     }
-  }, [lead?.id, lead?.clientProgress])
-
-  useEffect(() => {
-    if (lead?.clientAnswers && Object.keys(lead.clientAnswers).length > 0) {
-      setAnswers({ ...lead.clientAnswers })
-      setRichtext({ ...(lead.clientRichtext ?? {}) })
-      setOtherText({ ...(lead.clientOtherText ?? {}) })
-      setUploadedFiles([...(lead.clientUploadedDocuments ?? [])] as LeadDocument[])
-    } else {
-      const data = getClientTestData(token, lead?.id, questions)
-      setAnswers({ ...data.answers })
-      setRichtext({ ...data.richtext })
-    }
-  }, [lead?.id, token])
+    setLoadingPortal(true)
+    setLoadError(null)
+    api
+      .getPortalData(token)
+      .then(({ lead, questions }) => {
+        setPortalLead(lead)
+        setPortalQuestions(questions)
+        if (lead.clientProgress === 100 && lead.clientAnswers) {
+          setSubmitted(true)
+        }
+        if (lead.clientAnswers && Object.keys(lead.clientAnswers).length > 0) {
+          setAnswers({ ...lead.clientAnswers })
+          setRichtext({ ...(lead.clientRichtext ?? {}) })
+          setOtherText({ ...(lead.clientOtherText ?? {}) })
+        }
+        setUploadedFiles([...(lead.clientUploadedDocuments ?? [])])
+      })
+      .catch((e) => setLoadError(e instanceof Error ? e.message : 'Failed to load portal'))
+      .finally(() => setLoadingPortal(false))
+  }, [token])
 
   const answered = countAnswered(orderedQuestions, answerState)
   const pct = Math.min(
@@ -76,20 +85,24 @@ export function ClientPortal() {
     Math.round((answered / Math.max(orderedQuestions.length, 1)) * 100),
   )
 
-  const persist = (progress: number) => {
-    if (!lead) return
-    saveClientResponses(lead.id, answers, richtext, progress, {
-      otherText,
-      uploadedDocuments: uploadedFiles,
-    })
-    logActivity(
+  const persist = async (progress: number) => {
+    if (!token || !portalLead) return
+    const extras = { otherText, uploadedDocuments: uploadedFiles }
+    if (onBehalf && currentUser) {
+      await saveClientResponses(portalLead.id, answers, richtext, progress, extras)
+    } else {
+      const updated = await api.savePortalResponses(token, answers, richtext, progress, extras)
+      setPortalLead(updated)
+      setUploadedFiles([...(updated.clientUploadedDocuments ?? [])])
+    }
+    void logActivity(
       progress >= 100 ? 'client.portal_submit' : 'client.portal_save',
       onBehalf
-        ? `Executive saved on behalf — ${progress}% (${lead.companyName})`
-        : `Client progress ${progress}% — ${lead.companyName}`,
+        ? `Executive saved on behalf — ${progress}% (${portalLead.companyName})`
+        : `Client progress ${progress}% — ${portalLead.companyName}`,
       {
-        leadId: lead.id,
-        companyName: lead.companyName,
+        leadId: portalLead.id,
+        companyName: portalLead.companyName,
         actorName: onBehalf ? currentUser?.name : 'Client',
       },
     )
@@ -97,12 +110,12 @@ export function ClientPortal() {
     setTimeout(() => setSaved(false), 2000)
   }
 
-  const handleSubmit = () => {
-    persist(100)
+  const handleSubmit = async () => {
+    await persist(100)
     if (onBehalf) {
-      logActivity('client.on_behalf_fill', `Assessment submitted on behalf — ${lead?.companyName}`, {
-        leadId: lead?.id,
-        companyName: lead?.companyName,
+      void logActivity('client.on_behalf_fill', `Assessment submitted on behalf — ${portalLead?.companyName}`, {
+        leadId: portalLead?.id,
+        companyName: portalLead?.companyName,
       })
     }
     setSubmitted(true)
@@ -110,25 +123,44 @@ export function ClientPortal() {
   }
 
   const uploadFiles = async (list: FileList | File[]) => {
-    if (!lead) return
+    if (!portalLead || !token) return
     setUploading(true)
     try {
       for (const file of Array.from(list)) {
         const meta = documentFromFile(file, 'client')
-        const res = await api.uploadLeadDocument(lead.id, file, meta)
-        const row = res.document
-        setUploadedFiles((prev) => [
-          ...prev,
-          {
-            id: String(row.id),
-            name: String(row.name),
-            matchStatus: (row.match_status as LeadDocument['matchStatus']) ?? 'unmatched',
-            transactionDate: String(row.transaction_date ?? meta.transactionDate),
-            uploadedAt: String(row.uploaded_at ?? meta.uploadedAt),
-            source: 'client',
-            hasFile: true,
-          },
-        ])
+        if (onBehalf && currentUser) {
+          const res = await api.uploadLeadDocument(portalLead.id, file, meta)
+          const row = res.document
+          setUploadedFiles((prev) => [
+            ...prev,
+            {
+              id: String(row.id),
+              name: String(row.name),
+              matchStatus: (row.match_status as LeadDocument['matchStatus']) ?? 'unmatched',
+              transactionDate: String(row.transaction_date ?? meta.transactionDate),
+              uploadedAt: String(row.uploaded_at ?? meta.uploadedAt),
+              source: 'client',
+              hasFile: true,
+            },
+          ])
+          setPortalLead(api.dbToLead(res.lead as unknown as api.DbLead))
+        } else {
+          const res = await api.uploadLeadDocument(portalLead.id, file, meta)
+          const row = res.document
+          setUploadedFiles((prev) => [
+            ...prev,
+            {
+              id: String(row.id),
+              name: String(row.name),
+              matchStatus: (row.match_status as LeadDocument['matchStatus']) ?? 'unmatched',
+              transactionDate: String(row.transaction_date ?? meta.transactionDate),
+              uploadedAt: String(row.uploaded_at ?? meta.uploadedAt),
+              source: 'client',
+              hasFile: true,
+            },
+          ])
+          setPortalLead(api.dbToLead(res.lead as unknown as api.DbLead))
+        }
       }
     } finally {
       setUploading(false)
@@ -140,10 +172,26 @@ export function ClientPortal() {
     void uploadFiles(e.dataTransfer.files)
   }
 
+  if (loadingPortal) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center text-slate-500">
+        Loading assessment…
+      </div>
+    )
+  }
+
+  if (loadError || !portalLead) {
+    return (
+      <div className="mx-auto max-w-md px-6 py-20 text-center">
+        <p className="text-rose-600">{loadError ?? 'Portal not found'}</p>
+      </div>
+    )
+  }
+
   if (submitted) {
     return (
       <ClientPortalThankYou
-        companyName={lead?.companyName ?? 'your organization'}
+        companyName={portalLead.companyName}
         onBehalf={onBehalf}
         executiveName={currentUser?.name}
       />
@@ -166,9 +214,7 @@ export function ClientPortal() {
         <p className="text-xs font-semibold uppercase tracking-widest text-indigo-600">
           Secure client assessment
         </p>
-        <h1 className="mt-2 text-2xl font-bold text-slate-900">
-          {lead?.companyName ?? 'Assessment'}
-        </h1>
+        <h1 className="mt-2 text-2xl font-bold text-slate-900">{portalLead.companyName}</h1>
         <p
           className={`mt-2 min-h-[1.25rem] text-xs font-medium text-emerald-600 ${
             saved ? 'opacity-100' : 'opacity-0'
@@ -259,7 +305,7 @@ export function ClientPortal() {
               {uploadedFiles.length > 0 && (
                 <div className="mt-4">
                   <UploadedDocumentsTable
-                    leadId={lead?.id}
+                    leadId={portalLead.id}
                     portalToken={token}
                     documents={uploadedFiles}
                   />
@@ -275,7 +321,7 @@ export function ClientPortal() {
           variant="secondary"
           disabled={step === 0}
           onClick={() => {
-            persist(pct)
+            void persist(pct)
             setStep((s) => Math.max(0, s - 1))
           }}
         >
@@ -284,7 +330,7 @@ export function ClientPortal() {
         {!isDocStep ? (
           <Button
             onClick={() => {
-              persist(Math.round(((step + 1) / orderedQuestions.length) * 100))
+              void persist(Math.round(((step + 1) / orderedQuestions.length) * 100))
               if (step < orderedQuestions.length - 1) {
                 setStep((s) => s + 1)
               } else {
@@ -295,7 +341,7 @@ export function ClientPortal() {
             {step < orderedQuestions.length - 1 ? 'Next' : 'Continue to uploads'}
           </Button>
         ) : (
-          <Button onClick={handleSubmit}>Submit assessment</Button>
+          <Button onClick={() => void handleSubmit()}>Submit assessment</Button>
         )}
       </div>
     </div>

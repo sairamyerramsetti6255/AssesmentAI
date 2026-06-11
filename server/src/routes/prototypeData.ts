@@ -60,7 +60,16 @@ router.post('/auth/login', async (req: Request, res: Response) => {
     // Simple token = base64(userId:timestamp)
     const token = Buffer.from(`${data.id}:${Date.now()}`).toString('base64');
 
-    res.json({ token, user: { id: data.id, name: data.name, email: data.email, role: data.role } });
+    res.json({
+      token,
+      user: {
+        id: data.id,
+        name: data.name,
+        email: data.email,
+        role: data.role,
+        lastLogin: new Date().toISOString(),
+      },
+    });
   } catch (e) { err(res, e); }
 });
 
@@ -258,6 +267,30 @@ router.post('/leads/:id/approve', async (req: Request, res: Response) => {
 
 // ── save client answers ───────────────────────────────────────────────────
 
+router.put('/leads/:id/proposal', async (req: Request, res: Response) => {
+  try {
+    const { use_cases, architecture } = req.body as {
+      use_cases?: unknown[];
+      architecture?: Record<string, string>;
+    };
+    const patch: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+      last_interaction: new Date().toISOString().slice(0, 10),
+    };
+    if (use_cases !== undefined) patch.proposal_use_cases = use_cases;
+    if (architecture !== undefined) patch.proposal_architecture = architecture;
+
+    const { data, error } = await sb()
+      .from('leads')
+      .update(patch)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (e) { err(res, e); }
+});
+
 router.put('/leads/:id/client-responses', async (req: Request, res: Response) => {
   try {
     const { answers, richtext, other_text, uploaded_docs, progress } = req.body;
@@ -417,20 +450,83 @@ router.get('/portal/:token/documents/:docId/file', async (req: Request, res: Res
 
 // ── portal ────────────────────────────────────────────────────────────────
 
+router.put('/portal/:token/client-responses', async (req: Request, res: Response) => {
+  try {
+    const lead = await getLeadByPortalToken(String(req.params.token));
+    if (!lead) return res.status(404).json({ error: 'Invalid or expired link' });
+
+    const { answers, richtext, other_text, uploaded_docs, client_document_records, progress } = req.body;
+    const patch: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+      last_interaction: new Date().toISOString().slice(0, 10),
+    };
+    if (answers !== undefined) patch.client_answers = answers;
+    if (richtext !== undefined) patch.client_richtext = richtext;
+    if (other_text !== undefined) patch.client_other_text = other_text;
+    if (uploaded_docs !== undefined) patch.client_uploaded_docs = uploaded_docs;
+    if (client_document_records !== undefined) patch.client_document_records = client_document_records;
+    if (progress !== undefined) patch.client_progress = progress;
+
+    const { data, error } = await sb()
+      .from('leads')
+      .update(patch)
+      .eq('id', lead.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (e) { err(res, e); }
+});
+
 router.get('/portal/:token', async (req: Request, res: Response) => {
   try {
-    const { data: lead, error } = await sb()
-      .from('leads')
-      .select('id,company_name,industry,assessment_status,portal_token')
-      .eq('portal_token', req.params.token)
-      .single();
-    if (error || !lead) return res.status(404).json({ error: 'Invalid or expired link' });
+    const lead = await getLeadByPortalToken(String(req.params.token));
+    if (!lead) return res.status(404).json({ error: 'Invalid or expired link' });
     const { data: questions } = await sb()
       .from('prototype_questions')
       .select('*')
       .eq('lead_id', lead.id)
       .order('sort_order');
     res.json({ lead, questions: questions ?? [] });
+  } catch (e) { err(res, e); }
+});
+
+router.get('/analytics/driver-heatmap', async (_req: Request, res: Response) => {
+  try {
+    const { data, error } = await sb().from('prototype_questions').select('category');
+    if (error) throw error;
+    const counts: Record<string, number> = {};
+    for (const row of data ?? []) {
+      const cat = String((row as { category?: string }).category ?? 'Unknown');
+      counts[cat] = (counts[cat] ?? 0) + 1;
+    }
+    const heatmap = Object.entries(counts)
+      .map(([driver, count]) => ({ driver, count }))
+      .sort((a, b) => b.count - a.count);
+    res.json(heatmap);
+  } catch (e) { err(res, e); }
+});
+
+router.get('/analytics/summary', async (_req: Request, res: Response) => {
+  try {
+    const { data: leads, error } = await sb().from('leads').select('created_at,last_interaction,client_progress,funnel_status');
+    if (error) throw error;
+    const rows = leads ?? [];
+    const completed = rows.filter((l) => (l as { client_progress?: number }).client_progress === 100);
+    let avgVelocityDays = 0;
+    if (completed.length > 0) {
+      const total = completed.reduce((sum, l) => {
+        const created = new Date(String((l as { created_at: string }).created_at)).getTime();
+        const last = new Date(String((l as { last_interaction: string }).last_interaction)).getTime();
+        return sum + Math.max(1, Math.round((last - created) / 86_400_000));
+      }, 0);
+      avgVelocityDays = Math.round(total / completed.length);
+    }
+    res.json({
+      avg_velocity_days: avgVelocityDays,
+      active_pipeline: rows.filter((l) => !['converted', 'lost'].includes(String((l as { funnel_status: string }).funnel_status))).length,
+      portal_live: rows.filter((l) => (l as { funnel_status: string }).funnel_status === 'client_portal').length,
+    });
   } catch (e) { err(res, e); }
 });
 
@@ -651,6 +747,11 @@ router.post('/activity-log', async (req: Request, res: Response) => {
 
 async function getLead(id: string) {
   const { data } = await sb().from('leads').select('*').eq('id', id).single();
+  return data;
+}
+
+async function getLeadByPortalToken(token: string) {
+  const { data } = await sb().from('leads').select('*').eq('portal_token', token).single();
   return data;
 }
 

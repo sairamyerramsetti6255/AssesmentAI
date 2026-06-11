@@ -152,6 +152,13 @@ export interface Lead {
     executiveBrief: string
   }
   assessmentTaxonomy?: AssessmentTaxonomy
+  proposalUseCases?: UseCase[]
+  proposalArchitecture?: {
+    hosting: string
+    pipelines: string
+    access: string
+    security: string
+  }
 }
 
 export interface Executive {

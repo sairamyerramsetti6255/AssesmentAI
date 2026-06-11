@@ -96,6 +96,11 @@ interface AppContextValue {
   ) => Promise<void>
   refreshLeads: () => Promise<void>
   refreshQuestions: (leadId: string) => Promise<void>
+  saveProposal: (
+    leadId: string,
+    useCases: import('../types').UseCase[],
+    architecture: Lead['proposalArchitecture'],
+  ) => Promise<void>
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
@@ -195,6 +200,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const refreshLeads = useCallback(async () => { await fetchLeads() }, [])
   const refreshQuestions = useCallback(async (leadId: string) => { await fetchQuestions(leadId) }, [])
+
+  const saveProposal = useCallback(async (
+    leadId: string,
+    useCases: import('../types').UseCase[],
+    architecture: Lead['proposalArchitecture'],
+  ) => {
+    if (!architecture) return
+    const lead = await api.saveProposal(leadId, useCases, architecture)
+    setLeads((prev) => prev.map((l) => (l.id === leadId ? lead : l)))
+  }, [])
 
   // Update questions when selected lead changes
   useEffect(() => {
@@ -559,6 +574,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       logActivity: doLogActivity,
       refreshLeads,
       refreshQuestions,
+      saveProposal,
     }),
     [
       leads, questions, selectedLeadId, selectedLead, loading,
@@ -569,7 +585,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       masterData, addMasterDataItem, updateMasterDataItem, deleteMasterDataItem,
       mandatoryQuestions, addMandatoryQuestion, updateMandatoryQuestion, deleteMandatoryQuestion,
       currentUser, login, logout, updateProfile, updatePlatformUser, deletePlatformUser,
-      activityLog, doLogActivity, refreshLeads, refreshQuestions,
+      activityLog, doLogActivity, refreshLeads, refreshQuestions, saveProposal,
     ],
   )
 

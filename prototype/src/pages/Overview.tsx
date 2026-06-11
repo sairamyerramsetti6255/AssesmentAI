@@ -1,13 +1,24 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
-import { driverHeatmap, funnelStages } from '../data/mock'
+import { funnelStages } from '../data/constants'
+import * as api from '../lib/api'
+import type { DriverHeatmap } from '../types'
 import { Badge, Button, Card, PageHeader, StatCard } from '../components/ui'
 
 export function Overview() {
   const { leads } = useApp()
-  const active = leads.filter((l) => !['converted', 'lost'].includes(l.funnelStatus)).length
-  const inPortal = leads.filter((l) => l.funnelStatus === 'client_portal').length
-  const maxDriver = Math.max(...driverHeatmap.map((d) => d.count))
+  const [driverHeatmap, setDriverHeatmap] = useState<DriverHeatmap[]>([])
+  const [summary, setSummary] = useState({ avg_velocity_days: 0, active_pipeline: 0, portal_live: 0 })
+
+  useEffect(() => {
+    void api.getDriverHeatmap().then(setDriverHeatmap).catch(() => setDriverHeatmap([]))
+    void api.getAnalyticsSummary().then(setSummary).catch(() => {})
+  }, [leads.length])
+
+  const active = summary.active_pipeline || leads.filter((l) => !['converted', 'lost'].includes(l.funnelStatus)).length
+  const inPortal = summary.portal_live || leads.filter((l) => l.funnelStatus === 'client_portal').length
+  const maxDriver = Math.max(...driverHeatmap.map((d) => d.count), 1)
 
   return (
     <div>
@@ -25,10 +36,10 @@ export function Overview() {
         <StatCard label="Client portals live" value={inPortal} sub="Awaiting client input" />
         <StatCard
           label="Avg. discovery velocity"
-          value="11 days"
+          value={summary.avg_velocity_days ? `${summary.avg_velocity_days} days` : '—'}
           sub="Intake → portal completion"
         />
-        <StatCard label="Projected pipe value" value="$4.2M" sub="Forecast model (demo)" />
+        <StatCard label="Total leads" value={leads.length} sub="From Supabase" />
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="Conversion funnel (system-wide)">
@@ -56,21 +67,25 @@ export function Overview() {
           </div>
         </Card>
         <Card title="Core driver heatmap">
-          <div className="space-y-3">
-            {driverHeatmap.map((d) => (
-              <div key={d.driver} className="flex items-center gap-3">
-                <span className="w-40 shrink-0 text-xs font-medium text-slate-600">{d.driver}</span>
-                <div className="h-6 flex-1 overflow-hidden rounded bg-slate-100">
-                  <div
-                    className="flex h-full items-center rounded bg-indigo-500/80 pl-2 text-xs font-medium text-white"
-                    style={{ width: `${(d.count / maxDriver) * 100}%` }}
-                  >
-                    {d.count}
+          {driverHeatmap.length === 0 ? (
+            <p className="text-sm text-slate-500">No assessment questions in database yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {driverHeatmap.map((d) => (
+                <div key={d.driver} className="flex items-center gap-3">
+                  <span className="w-40 shrink-0 text-xs font-medium text-slate-600">{d.driver}</span>
+                  <div className="h-6 flex-1 overflow-hidden rounded bg-slate-100">
+                    <div
+                      className="flex h-full items-center rounded bg-indigo-500/80 pl-2 text-xs font-medium text-white"
+                      style={{ width: `${(d.count / maxDriver) * 100}%` }}
+                    >
+                      {d.count}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </Card>
       </div>
       <Card title="Recent leads" className="mt-6">

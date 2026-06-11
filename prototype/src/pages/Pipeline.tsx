@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useApp } from '../context/AppContext'
-import { funnelStages } from '../data/mock'
+import { funnelStages } from '../data/constants'
 import { pipelineRemarkSamples } from '../data/testData'
 import type { FunnelStatus, Lead } from '../types'
 import { UploadedDocumentsTable } from '../components/UploadedDocumentsTable'
