@@ -30,10 +30,64 @@ interface DocumentRecord {
 
 function sb() { return requireSupabase(); }
 
+const OPTIONAL_LEAD_COLUMNS = [
+  'document_records',
+  'client_document_records',
+  'proposal_use_cases',
+  'proposal_architecture',
+] as const;
+
+function formatError(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (e && typeof e === 'object' && 'message' in e) {
+    return String((e as { message: unknown }).message);
+  }
+  return String(e);
+}
+
 function err(res: Response, e: unknown, status = 500) {
-  const msg = e instanceof Error ? e.message : String(e);
-  console.error('[prototypeData]', msg);
+  const msg = formatError(e);
+  console.error('[prototypeData]', e);
   return res.status(status).json({ error: msg });
+}
+
+/** Insert lead — retries without optional JSONB columns if migrations 004/005 not applied yet */
+async function insertLeadRow(row: Record<string, unknown>) {
+  let payload = { ...row };
+  for (let attempt = 0; attempt < OPTIONAL_LEAD_COLUMNS.length + 1; attempt++) {
+    const { data, error } = await sb().from('leads').insert(payload).select().single();
+    if (!error) return data;
+    if (error.code === 'PGRST204') {
+      const missing = OPTIONAL_LEAD_COLUMNS.find((col) => error.message.includes(col));
+      if (missing && missing in payload) {
+        const next = { ...payload };
+        delete next[missing];
+        payload = next;
+        continue;
+      }
+    }
+    throw error;
+  }
+  throw new Error('Failed to insert lead');
+}
+
+async function updateLeadRow(id: string, patch: Record<string, unknown>) {
+  let payload = { ...patch };
+  for (let attempt = 0; attempt < OPTIONAL_LEAD_COLUMNS.length + 1; attempt++) {
+    const { data, error } = await sb().from('leads').update(payload).eq('id', id).select().single();
+    if (!error) return data;
+    if (error.code === 'PGRST204') {
+      const missing = OPTIONAL_LEAD_COLUMNS.find((col) => error.message.includes(col));
+      if (missing && missing in payload) {
+        const next = { ...payload };
+        delete next[missing];
+        payload = next;
+        continue;
+      }
+    }
+    throw error;
+  }
+  throw new Error('Failed to update lead');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -200,26 +254,21 @@ router.post('/leads', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'company_name, industry, domain required' });
     }
     const today = new Date().toISOString().slice(0, 10);
-    const { data, error } = await sb()
-      .from('leads')
-      .insert({
-        id: uuidv4(),
-        company_name,
-        industry,
-        domain,
-        country: country ?? '',
-        assigned_executive: assigned_executive ?? '',
-        funnel_status: 'intake',
-        assessment_status: 'draft',
-        research_progress: 0,
-        documents: documents ?? [],
-        document_records: document_records ?? [],
-        remarks: [],
-        last_interaction: today,
-      })
-      .select()
-      .single();
-    if (error) throw error;
+    const data = await insertLeadRow({
+      id: uuidv4(),
+      company_name,
+      industry,
+      domain,
+      country: country ?? '',
+      assigned_executive: assigned_executive ?? '',
+      funnel_status: 'intake',
+      assessment_status: 'draft',
+      research_progress: 0,
+      documents: documents ?? [],
+      document_records: document_records ?? [],
+      remarks: [],
+      last_interaction: today,
+    });
     res.status(201).json(data);
   } catch (e) { err(res, e); }
 });
