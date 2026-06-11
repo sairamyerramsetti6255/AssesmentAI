@@ -1,3 +1,5 @@
+import { APIError } from 'openai';
+import { getOpenRouterJsonModel, isReasoningModel } from './openrouterClient.js';
 import { handleChatCompletion } from './chatHandlers.js';
 import { extractFirstJsonBlock, parseJsonFromLlm } from './parseJson.js';
 import { scrapeWebsite } from './scrape.js';
@@ -33,38 +35,78 @@ function extractAssistantText(res) {
         return res.content.trim();
     return reasoning;
 }
-async function complete(client, config, system, user, options) {
-    const res = await handleChatCompletion(client, config, {
-        messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: user },
-        ],
-        reasoning: options?.reasoning ?? false,
-        max_tokens: options?.max_tokens,
-    });
-    return extractAssistantText(res);
+function jsonReasoningForModel(model) {
+    if (!isReasoningModel(model))
+        return undefined;
+    return { effort: 'low' };
 }
-/** OpenRouter JSON completion with larger token budget + retry on parse failure. */
+function wrapOpenRouterError(err) {
+    if (err instanceof APIError) {
+        if (err.status === 429) {
+            throw new Error('OpenRouter free model daily limit reached — wait until reset or add credits at openrouter.ai/settings/credits');
+        }
+        const msg = err.error?.message ?? err.message;
+        throw new Error(`OpenRouter API error (${err.status}): ${msg}`);
+    }
+    throw err;
+}
+async function complete(client, config, system, user, options) {
+    const model = options?.model ?? config.model;
+    try {
+        const res = await handleChatCompletion(client, config, {
+            messages: [
+                { role: 'system', content: system },
+                { role: 'user', content: user },
+            ],
+            model,
+            reasoning: options?.reasoning ?? false,
+            reasoningConfig: options?.reasoningConfig ?? jsonReasoningForModel(model),
+            max_tokens: options?.max_tokens,
+            responseFormat: options?.jsonMode ? { type: 'json_object' } : undefined,
+        });
+        const text = extractAssistantText(res);
+        if (!text.trim() && res.finishReason === 'length') {
+            throw new SyntaxError('AI response truncated — increase max_tokens or use a shorter prompt');
+        }
+        return text;
+    }
+    catch (err) {
+        wrapOpenRouterError(err);
+    }
+}
+/** OpenRouter JSON — low reasoning budget, retries, optional fallback model. */
 async function completeJson(client, config, system, user, options) {
     const jsonSystem = `${system}\n\nRespond with valid JSON only — no markdown fences, no prose. Start with {`;
-    const maxTokens = options?.max_tokens ?? 12000;
-    const run = async (prompt) => {
-        const raw = await complete(client, config, jsonSystem, prompt, { max_tokens: maxTokens });
-        return parseJsonFromLlm(raw);
-    };
-    try {
-        return await run(user);
-    }
-    catch (firstErr) {
-        const concise = options?.concisePrompt ??
-            `${user}\n\nCRITICAL: Previous response was invalid. Return one complete JSON object. Keep arrays short and strings under 120 characters.`;
-        try {
-            return await run(concise);
+    const maxTokens = options?.max_tokens ?? 32000;
+    const concise = options?.concisePrompt ??
+        `${user}\n\nCRITICAL: Return one complete JSON object. Max 8 items per array. Short strings only.`;
+    const models = [
+        options?.model ?? config.model,
+        getOpenRouterJsonModel(),
+    ].filter((m, i, arr) => Boolean(m) && arr.indexOf(m) === i);
+    let lastErr;
+    for (const model of models) {
+        const useJsonMode = !isReasoningModel(model);
+        for (const prompt of [user, concise]) {
+            try {
+                const raw = await complete(client, config, jsonSystem, prompt, {
+                    max_tokens: maxTokens,
+                    model,
+                    jsonMode: useJsonMode,
+                    reasoningConfig: jsonReasoningForModel(model),
+                });
+                if (!raw.trim()) {
+                    throw new SyntaxError('AI returned empty response — model may be rate-limited or busy');
+                }
+                return parseJsonFromLlm(raw);
+            }
+            catch (err) {
+                lastErr = err instanceof Error ? err : new SyntaxError(String(err));
+                console.warn(`[openrouter] JSON parse failed (${model}): ${lastErr.message}`);
+            }
         }
-        catch {
-            throw firstErr instanceof Error ? firstErr : new SyntaxError(String(firstErr));
-        }
     }
+    throw lastErr ?? new SyntaxError('Failed to parse AI JSON response');
 }
 export async function runResearchPipeline(client, config, lead) {
     const scrape = await scrapeWebsite(lead.domain);
@@ -151,37 +193,46 @@ function normalizeGeneratedQuestion(q) {
     }
     return { ...q, type, options };
 }
+const TAXONOMY_SYSTEM = `You are a Domain-Agnostic AI & Process Architect. Given client context, produce assessment taxonomy buckets as JSON only.`;
 export async function generateAssessmentQuestions(client, config, lead, research) {
     const userDomain = `${lead.industry} — ${lead.companyName} (${lead.country})`;
-    const user = `[User Domain]: ${userDomain}
+    const context = `Company: ${lead.companyName} (${lead.industry}, ${lead.country})
+Domain: ${lead.domain}
+Brief: ${research.executiveBrief.slice(0, 2500)}
+Web: ${research.webInsights.slice(0, 6).join('; ')}
+Docs: ${research.documentInsights.slice(0, 5).join('; ')}`;
+    const taxParsed = await completeJson(client, config, TAXONOMY_SYSTEM, `${context}
 
-Company domain/URL: ${lead.domain}
-Research brief:
-${research.executiveBrief}
+Return JSON only:
+{"userDomain":"${userDomain}","taxonomy":{"technicalPainPoints":["4-5 items"],"operationalPainAreas":["4-5 items"],"processImprovements":["4-5 items"]}}`, { max_tokens: 8000 });
+    const taxonomy = {
+        technicalPainPoints: taxParsed.taxonomy?.technicalPainPoints ?? [],
+        operationalPainAreas: taxParsed.taxonomy?.operationalPainAreas ?? [],
+        processImprovements: taxParsed.taxonomy?.processImprovements ?? [],
+    };
+    const questionsUser = `[User Domain]: ${userDomain}
 
-Web insights: ${research.webInsights.join('; ')}
-Competitors: ${research.competitors.join('; ')}
-Document themes: ${research.documentInsights.join('; ')}
+${context}
 
-Populate the modular assessment configuration for this domain. Generate 12 ordered questions.
-"options" = choices shown to the CLIENT in the portal (specific, selectable).
-"suggestedOptions" = extra choices executives may inject later (not default client-facing).
-Keep option labels short (under 8 words). Return one complete JSON object.`;
-    const parsed = await completeJson(client, config, ASSESSMENT_ARCHITECT_SYSTEM, user, {
-        max_tokens: 16000,
-        concisePrompt: `${user}\n\nCRITICAL: Return complete valid JSON with exactly 10 questions. Max 5 options per question. No markdown.`,
+Taxonomy:
+${JSON.stringify(taxonomy)}
+
+Generate exactly 10 assessment questions mapped to taxonomy pillars.
+"options" = client-facing choices (4-5 per choice question). Do NOT include "Other".
+"suggestedOptions" = 2 executive-only extras.
+Keep labels short. Return JSON only:
+{"questions":[{"taxonomyPillar":"Technical Pain Points|Non-Technical / Operational Pain Areas|Process Improvements","domainContext":"string","text":"string","type":"singlechoice|multichoice|scale|text","options":[],"suggestedOptions":[],"sortOrder":0}]}`;
+    const qParsed = await completeJson(client, config, ASSESSMENT_ARCHITECT_SYSTEM, questionsUser, {
+        max_tokens: 32000,
+        concisePrompt: `${questionsUser}\n\nCRITICAL: Return {"questions":[...]} with exactly 8 questions. Max 4 options each.`,
     });
-    const questions = (parsed.questions ?? []).map((q, i) => normalizeGeneratedQuestion({
+    const questions = (qParsed.questions ?? []).map((q, i) => normalizeGeneratedQuestion({
         ...q,
         sortOrder: q.sortOrder ?? i,
     }));
     return {
-        userDomain: parsed.userDomain ?? userDomain,
-        taxonomy: parsed.taxonomy ?? {
-            technicalPainPoints: [],
-            operationalPainAreas: [],
-            processImprovements: [],
-        },
+        userDomain: taxParsed.userDomain ?? userDomain,
+        taxonomy,
         questions,
     };
 }
@@ -316,20 +367,12 @@ Return JSON only:
 }
 Provide exactly 4 useCases and 4 functionalCapabilities grounded in client responses. Keep each string under 2 sentences. Be specific — no generic filler. Return one complete JSON object — no markdown fences.`;
     const system = 'You are a senior AI strategy consultant at Proficient Business Service Ltd. (PBS) writing client-ready scope-of-work documents. Respond with valid JSON only — no prose, no code fences.';
-    const parseProposalJson = async (prompt) => {
-        const raw = await complete(client, config, system, prompt, { max_tokens: 12000 });
-        return parseJsonFromLlm(raw);
-    };
-    let parsed;
-    try {
-        parsed = await parseProposalJson(user);
-    }
-    catch {
-        const concise = `${user}
+    const parsed = await completeJson(client, config, system, user, {
+        max_tokens: 32000,
+        concisePrompt: `${user}
 
-CRITICAL: Previous response was truncated. Return valid complete JSON. Limit every array to 4 items max. Keep paragraphs to 1-2 sentences.`;
-        parsed = await parseProposalJson(concise);
-    }
+CRITICAL: Return valid complete JSON. Limit every array to 4 items max. Keep paragraphs to 1-2 sentences.`,
+    });
     const doc = parsed.document ?? buildFallbackProposalDocument(lead, parsed);
     return {
         summary: parsed.summary ?? doc.executiveSummary,

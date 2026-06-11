@@ -9,18 +9,27 @@ export type ORChatMessage = {
   reasoning_details?: unknown;
 };
 
+export type ORReasoningConfig = {
+  effort?: 'minimal' | 'low' | 'medium' | 'high';
+  exclude?: boolean;
+  max_tokens?: number;
+};
+
 export interface ChatRequestBody {
   messages: ORChatMessage[];
   model?: string;
   reasoning?: boolean;
+  reasoningConfig?: ORReasoningConfig;
   stream?: boolean;
   max_tokens?: number;
+  responseFormat?: { type: 'json_object' };
 }
 
 export interface ChatCompletionResponse {
   content: string | null;
   reasoning_details?: unknown;
   model: string;
+  finishReason?: string | null;
 }
 
 type ORAssistantMessage = {
@@ -28,6 +37,12 @@ type ORAssistantMessage = {
   content: string | null;
   reasoning_details?: unknown;
 };
+
+function buildReasoningParam(body: ChatRequestBody): Record<string, unknown> | undefined {
+  if (body.reasoningConfig) return { reasoning: body.reasoningConfig };
+  if (body.reasoning) return { reasoning: { enabled: true } };
+  return undefined;
+}
 
 export async function handleChatCompletion(
   client: OpenAI,
@@ -41,16 +56,19 @@ export async function handleChatCompletion(
     model,
     messages,
     stream: false,
-    max_tokens: body.max_tokens ?? 2048,
-    ...(body.reasoning ? { reasoning: { enabled: true } } : {}),
+    max_tokens: body.max_tokens ?? 4096,
+    ...(body.responseFormat ? { response_format: body.responseFormat } : {}),
+    ...buildReasoningParam(body),
   } as Parameters<OpenAI['chat']['completions']['create']>[0])) as ChatCompletion;
 
-  const message = apiResponse.choices[0]?.message as ORAssistantMessage | undefined;
+  const choice = apiResponse.choices[0];
+  const message = choice?.message as ORAssistantMessage | undefined;
 
   return {
     content: message?.content ?? null,
     reasoning_details: message?.reasoning_details,
     model,
+    finishReason: choice?.finish_reason ?? null,
   };
 }
 
@@ -67,7 +85,7 @@ export async function handleChatStream(
     model,
     messages,
     stream: true,
-    ...(body.reasoning ? { reasoning: { enabled: true } } : {}),
+    ...buildReasoningParam(body),
   } as Parameters<OpenAI['chat']['completions']['create']>[0]);
 
   res.status(200);

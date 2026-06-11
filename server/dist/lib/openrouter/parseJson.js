@@ -86,8 +86,10 @@ export function parseJsonFromLlm(content) {
     if (!trimmed) {
         throw new SyntaxError('AI returned empty response — try again or check model availability');
     }
-    const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
-    const candidate = fence ? fence[1].trim() : trimmed;
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
+    const candidate = fenced
+        ? fenced[1].trim()
+        : trimmed.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
     const attempts = [candidate, repairTruncatedJson(candidate)];
     const errors = [];
     for (const attempt of attempts) {

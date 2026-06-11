@@ -1,3 +1,10 @@
+function buildReasoningParam(body) {
+    if (body.reasoningConfig)
+        return { reasoning: body.reasoningConfig };
+    if (body.reasoning)
+        return { reasoning: { enabled: true } };
+    return undefined;
+}
 export async function handleChatCompletion(client, config, body) {
     const model = body.model ?? config.model;
     const messages = body.messages ?? [];
@@ -5,14 +12,17 @@ export async function handleChatCompletion(client, config, body) {
         model,
         messages,
         stream: false,
-        max_tokens: body.max_tokens ?? 2048,
-        ...(body.reasoning ? { reasoning: { enabled: true } } : {}),
+        max_tokens: body.max_tokens ?? 4096,
+        ...(body.responseFormat ? { response_format: body.responseFormat } : {}),
+        ...buildReasoningParam(body),
     }));
-    const message = apiResponse.choices[0]?.message;
+    const choice = apiResponse.choices[0];
+    const message = choice?.message;
     return {
         content: message?.content ?? null,
         reasoning_details: message?.reasoning_details,
         model,
+        finishReason: choice?.finish_reason ?? null,
     };
 }
 export async function handleChatStream(client, config, body, res) {
@@ -22,7 +32,7 @@ export async function handleChatStream(client, config, body, res) {
         model,
         messages,
         stream: true,
-        ...(body.reasoning ? { reasoning: { enabled: true } } : {}),
+        ...buildReasoningParam(body),
     });
     res.status(200);
     res.setHeader('Content-Type', 'text/event-stream');
