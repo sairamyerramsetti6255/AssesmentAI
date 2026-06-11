@@ -1,7 +1,7 @@
 import type OpenAI from 'openai'
 import type { OpenRouterConfig } from './openrouterClient.js';
 import { handleChatCompletion } from './chatHandlers.js';
-import { parseJsonFromLlm } from './parseJson.js';
+import { extractFirstJsonBlock, parseJsonFromLlm } from './parseJson.js';
 import { scrapeWebsite } from './scrape.js';
 import { ASSESSMENT_ARCHITECT_SYSTEM } from './assessmentSchema.js';
 
@@ -23,12 +23,9 @@ export interface ResearchResult {
   executiveBrief: string
 }
 
-function extractAssistantText(res: { content: string | null; reasoning_details?: unknown }): string {
-  if (res.content?.trim()) return res.content
-
-  if (!Array.isArray(res.reasoning_details)) return ''
-
-  const reasoningText = res.reasoning_details
+function reasoningDetailsText(details: unknown): string {
+  if (!Array.isArray(details)) return ''
+  return details
     .map((detail) => {
       if (typeof detail !== 'object' || detail === null || !('text' in detail)) return ''
       const text = (detail as { text?: unknown }).text
@@ -36,9 +33,23 @@ function extractAssistantText(res: { content: string | null; reasoning_details?:
     })
     .filter(Boolean)
     .join('\n')
+}
 
-  const jsonMatch = reasoningText.match(/\{[\s\S]*\}/)
-  return jsonMatch?.[0] ?? reasoningText
+/** Pull JSON from content and/or reasoning (OpenRouter reasoning models). */
+function extractAssistantText(res: { content: string | null; reasoning_details?: unknown }): string {
+  const parts: string[] = []
+  if (res.content?.trim()) parts.push(res.content.trim())
+  const reasoning = reasoningDetailsText(res.reasoning_details)
+  if (reasoning) parts.push(reasoning)
+
+  const combined = parts.join('\n\n')
+  if (!combined) return ''
+
+  const jsonBlock = extractFirstJsonBlock(combined)
+  if (jsonBlock) return jsonBlock
+
+  if (res.content?.trim()) return res.content.trim()
+  return reasoning
 }
 
 async function complete(
@@ -57,6 +68,36 @@ async function complete(
     max_tokens: options?.max_tokens,
   })
   return extractAssistantText(res)
+}
+
+/** OpenRouter JSON completion with larger token budget + retry on parse failure. */
+async function completeJson<T>(
+  client: OpenAI,
+  config: OpenRouterConfig,
+  system: string,
+  user: string,
+  options?: { max_tokens?: number; concisePrompt?: string },
+): Promise<T> {
+  const jsonSystem = `${system}\n\nRespond with valid JSON only — no markdown fences, no prose. Start with {`
+  const maxTokens = options?.max_tokens ?? 12000
+
+  const run = async (prompt: string) => {
+    const raw = await complete(client, config, jsonSystem, prompt, { max_tokens: maxTokens })
+    return parseJsonFromLlm<T>(raw)
+  }
+
+  try {
+    return await run(user)
+  } catch (firstErr) {
+    const concise =
+      options?.concisePrompt ??
+      `${user}\n\nCRITICAL: Previous response was invalid. Return one complete JSON object. Keep arrays short and strings under 120 characters.`
+    try {
+      return await run(concise)
+    } catch {
+      throw firstErr instanceof Error ? firstErr : new SyntaxError(String(firstErr))
+    }
+  }
 }
 
 export async function runResearchPipeline(
@@ -92,12 +133,14 @@ Provide 4-6 webInsights bullets and 3-5 competitor names/programs relevant to AI
       config,
       'You analyze company websites for B2B AI discovery. Respond with valid JSON only, no markdown.',
       webUser,
+      { max_tokens: 4096 },
     ),
     complete(
       client,
       config,
       'You infer document discovery themes from filenames for enterprise AI assessments. JSON only.',
       docUser,
+      { max_tokens: 2048 },
     ),
   ])
   let webInsights: string[] = []
@@ -207,13 +250,21 @@ Web insights: ${research.webInsights.join('; ')}
 Competitors: ${research.competitors.join('; ')}
 Document themes: ${research.documentInsights.join('; ')}
 
-Populate the modular assessment configuration for this domain. Generate 12–15 ordered questions.
+Populate the modular assessment configuration for this domain. Generate 12 ordered questions.
 "options" = choices shown to the CLIENT in the portal (specific, selectable).
-"suggestedOptions" = extra choices executives may inject later (not default client-facing).`
+"suggestedOptions" = extra choices executives may inject later (not default client-facing).
+Keep option labels short (under 8 words). Return one complete JSON object.`
 
-  const raw = await complete(client, config, ASSESSMENT_ARCHITECT_SYSTEM, user)
-
-  const parsed = parseJsonFromLlm<AssessmentGenerationResult>(raw)
+  const parsed = await completeJson<AssessmentGenerationResult>(
+    client,
+    config,
+    ASSESSMENT_ARCHITECT_SYSTEM,
+    user,
+    {
+      max_tokens: 16000,
+      concisePrompt: `${user}\n\nCRITICAL: Return complete valid JSON with exactly 10 questions. Max 5 options per question. No markdown.`,
+    },
+  )
   const questions = (parsed.questions ?? []).map((q, i) => normalizeGeneratedQuestion({
     ...q,
     sortOrder: q.sortOrder ?? i,
@@ -287,8 +338,13 @@ ${peerSummaries.length ? peerSummaries.join('\n') : '(none)'}
 
 sortOrder must be ${question.sortOrder}.`
 
-  const raw = await complete(client, config, REWRITE_QUESTION_SYSTEM, user)
-  const parsed = parseJsonFromLlm<GeneratedQuestionPayload>(raw)
+  const parsed = await completeJson<GeneratedQuestionPayload>(
+    client,
+    config,
+    REWRITE_QUESTION_SYSTEM,
+    user,
+    { max_tokens: 4096 },
+  )
   return normalizeGeneratedQuestion({
     ...parsed,
     taxonomyPillar: parsed.taxonomyPillar ?? question.taxonomyPillar,
@@ -322,14 +378,13 @@ Return JSON only:
 Use keys q-0, q-1, ... in question order (matching array index).
 For slider use 1-10, rating 1-5, multiselect MUST use exact strings from that question's "options" array only.`
 
-  const raw = await complete(
+  return completeJson<{ answers: Record<string, string | number | string[]>; richtext: Record<string, string> }>(
     client,
     config,
     'You simulate plausible enterprise assessment responses. JSON only.',
     user,
+    { max_tokens: 8000 },
   )
-
-  return parseJsonFromLlm<{ answers: Record<string, string | number | string[]>; richtext: Record<string, string> }>(raw)
 }
 
 export type ProposalCapability = {

@@ -1,0 +1,10 @@
+# Apache SPA fallback — required on Hostinger shared hosting so React Router
+# refresh on /assessment, /intake, /proposal, etc. does not return 404.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule . /index.html [L]
+</IfModule>
