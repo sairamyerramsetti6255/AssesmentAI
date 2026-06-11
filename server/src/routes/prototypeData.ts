@@ -52,7 +52,16 @@ router.post('/auth/login', async (req: Request, res: Response) => {
       .eq('password', password)
       .single();
 
-    if (error || !data) return res.status(401).json({ error: 'Invalid credentials' });
+    if (error) {
+      console.error('[auth/login] Supabase error:', error.message);
+      if (error.code === 'PGRST116') {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+      return res.status(503).json({
+        error: 'Database unavailable. Run Supabase migrations (003_prototype_schema.sql) and check SUPABASE_* env vars.',
+      });
+    }
+    if (!data) return res.status(401).json({ error: 'Invalid credentials' });
 
     // Update last_login
     await sb().from('platform_users').update({ last_login: new Date().toISOString() }).eq('id', data.id);

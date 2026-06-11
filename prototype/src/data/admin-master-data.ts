@@ -8,18 +8,18 @@ export const MASTER_DATA_LABELS: Record<MasterDataCategory, string> = {
   maturityStages: 'Maturity Stages',
 }
 
-/** Demo credentials — shown on login page */
+/** Demo credentials — must match supabase/migrations/003_prototype_schema.sql platform_users seed */
 export const DEMO_CREDENTIALS = [
-  { email: 'elena@assessment.ai', password: 'admin123', role: 'Super Admin' },
-  { email: 'marcus@assessment.ai', password: 'lead123', role: 'Sales Manager' },
-  { email: 'sarah@assessment.ai', password: 'exec123', role: 'Sales Rep' },
+  { email: 'admin@pbshope.com', password: 'admin123', role: 'Super Admin' },
+  { email: 'manager@pbshope.com', password: 'manager123', role: 'Sales Manager' },
+  { email: 'rep@pbshope.com', password: 'rep123', role: 'Sales Rep' },
 ] as const
 
 export const initialPlatformUsers: PlatformUser[] = [
   {
     id: 'u-1',
     name: 'Elena Vasquez',
-    email: 'elena@assessment.ai',
+    email: 'admin@pbshope.com',
     role: 'super_admin',
     password: 'admin123',
     lastLogin: '2026-06-04T08:00:00',
@@ -27,17 +27,17 @@ export const initialPlatformUsers: PlatformUser[] = [
   {
     id: 'u-2',
     name: 'Marcus Webb',
-    email: 'marcus@assessment.ai',
+    email: 'manager@pbshope.com',
     role: 'team_lead',
-    password: 'lead123',
+    password: 'manager123',
     lastLogin: '2026-06-03T16:45:00',
   },
   {
     id: 'u-3',
-    name: 'Sarah Chen',
-    email: 'sarah@assessment.ai',
+    name: 'Sarah Kim',
+    email: 'rep@pbshope.com',
     role: 'account_executive',
-    password: 'exec123',
+    password: 'rep123',
     lastLogin: '2026-06-04T09:12:00',
   },
 ]
