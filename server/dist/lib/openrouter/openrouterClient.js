@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
-export const OPENROUTER_FREE_MODEL = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
+export const OPENROUTER_FREE_MODEL = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning';
 /** Non-reasoning fallback when the primary model returns no JSON (free tier). */
-export const OPENROUTER_JSON_FALLBACK_MODEL = 'google/gemma-3-12b-it:free';
+export const OPENROUTER_JSON_FALLBACK_MODEL = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning';
 export function createOpenRouterClient(config) {
     const defaultHeaders = {};
     if (config.siteUrl)
