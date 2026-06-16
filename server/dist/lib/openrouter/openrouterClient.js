@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
-export const OPENROUTER_FREE_MODEL = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning';
+export const OPENROUTER_FREE_MODEL = 'meta-llama/llama-3.3-70b-instruct';
 /** Non-reasoning fallback when the primary model returns no JSON (free tier). */
-export const OPENROUTER_JSON_FALLBACK_MODEL = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning';
+export const OPENROUTER_JSON_FALLBACK_MODEL = 'meta-llama/llama-3.3-70b-instruct';
 export function createOpenRouterClient(config) {
     const defaultHeaders = {};
     if (config.siteUrl)
