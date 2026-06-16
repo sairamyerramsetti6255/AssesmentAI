@@ -759,20 +759,33 @@ router.put('/leads/:leadId/questions', async (req, res) => {
             return res.status(400).json({ error: 'array expected' });
         await sb().from('prototype_questions').delete().eq('lead_id', req.params.leadId);
         if (questions.length > 0) {
-            const rows = questions.map((q, i) => ({
-                id: isValidUuid(q.id) ? q.id : uuidv4(),
-                lead_id: req.params.leadId,
-                sort_order: typeof q.sort_order === 'number' ? q.sort_order : i,
-                taxonomy_pillar: q.taxonomy_pillar ?? q.taxonomyPillar ?? 'Technical Pain Points',
-                domain_context: q.domain_context ?? q.domainContext ?? '',
-                category: q.category ?? 'Technology Stack',
-                text: q.text ?? '',
-                type: q.type ?? 'singlechoice',
-                options: q.options ?? [],
-                suggested_options: q.suggested_options ?? q.suggestedOptions ?? [],
-                is_mandatory: q.is_mandatory ?? q.isMandatory ?? false,
-            }));
-            const { error } = await sb().from('prototype_questions').insert(rows);
+            // Guarantee unique primary keys within the batch — duplicate/invalid
+            // ids (e.g. repeated mandatory questions) get a fresh UUID.
+            const seenIds = new Set();
+            const rows = questions.map((q, i) => {
+                let id = isValidUuid(q.id) ? q.id : uuidv4();
+                while (seenIds.has(id))
+                    id = uuidv4();
+                seenIds.add(id);
+                return {
+                    id,
+                    lead_id: req.params.leadId,
+                    sort_order: typeof q.sort_order === 'number' ? q.sort_order : i,
+                    taxonomy_pillar: q.taxonomy_pillar ?? q.taxonomyPillar ?? 'Technical Pain Points',
+                    domain_context: q.domain_context ?? q.domainContext ?? '',
+                    category: q.category ?? 'Technology Stack',
+                    text: q.text ?? '',
+                    type: q.type ?? 'singlechoice',
+                    options: q.options ?? [],
+                    suggested_options: q.suggested_options ?? q.suggestedOptions ?? [],
+                    is_mandatory: q.is_mandatory ?? q.isMandatory ?? false,
+                };
+            });
+            // Upsert (not insert) so a concurrent save racing the delete cannot
+            // trip the prototype_questions_pkey unique constraint.
+            const { error } = await sb()
+                .from('prototype_questions')
+                .upsert(rows, { onConflict: 'id' });
             if (error)
                 throw error;
         }
