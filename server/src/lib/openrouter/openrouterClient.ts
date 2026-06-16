@@ -1,9 +1,26 @@
 import OpenAI from 'openai';
 
-export const OPENROUTER_FREE_MODEL = 'meta-llama/llama-3.3-70b-instruct';
+/** Paid default — reliable structured JSON, low cost. */
+export const OPENROUTER_DEFAULT_MODEL = 'openai/gpt-4o-mini';
 
-/** Non-reasoning fallback when the primary model returns no JSON (free tier). */
-export const OPENROUTER_JSON_FALLBACK_MODEL = 'meta-llama/llama-3.3-70b-instruct';
+/** Kept for backwards-compat with older imports. */
+export const OPENROUTER_FREE_MODEL = OPENROUTER_DEFAULT_MODEL;
+
+/** Fallback model when the primary model returns no JSON. */
+export const OPENROUTER_JSON_FALLBACK_MODEL = OPENROUTER_DEFAULT_MODEL;
+
+/** Models that were removed from OpenRouter — ignore stale env values pointing here. */
+const DEAD_MODEL_PATTERNS = [/nemotron-3-nano-omni/i, /nemotron-3-nano-30b/i];
+
+function sanitizeModel(model: string | undefined): string {
+  const trimmed = model?.trim();
+  if (!trimmed) return OPENROUTER_DEFAULT_MODEL;
+  if (DEAD_MODEL_PATTERNS.some((re) => re.test(trimmed))) {
+    console.warn(`[openrouter] Model "${trimmed}" is unavailable — using ${OPENROUTER_DEFAULT_MODEL}`);
+    return OPENROUTER_DEFAULT_MODEL;
+  }
+  return trimmed;
+}
 
 export interface OpenRouterConfig {
   apiKey: string;
@@ -32,14 +49,14 @@ export function getOpenRouterConfigFromEnv(): OpenRouterConfig | null {
 
   return {
     apiKey,
-    model: process.env.OPENROUTER_MODEL?.trim() || OPENROUTER_FREE_MODEL,
+    model: sanitizeModel(process.env.OPENROUTER_MODEL),
     siteUrl: process.env.OPENROUTER_SITE_URL?.trim(),
     appName: process.env.OPENROUTER_APP_NAME?.trim() || 'AI Readiness Assessment',
   };
 }
 
 export function getOpenRouterJsonModel(): string {
-  return process.env.OPENROUTER_JSON_MODEL?.trim() || OPENROUTER_JSON_FALLBACK_MODEL;
+  return sanitizeModel(process.env.OPENROUTER_JSON_MODEL);
 }
 
 export function isReasoningModel(model: string): boolean {
