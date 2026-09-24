@@ -18,6 +18,7 @@ export interface LeadPayload {
   industry: string
   domain: string
   country: string
+  city?: string
   documents: string[]
 }
 
@@ -190,12 +191,27 @@ async function completeJson<T>(
   throw lastErr ?? new SyntaxError('Failed to parse AI JSON response')
 }
 
+export interface ResearchPipelineOptions {
+  onProgress?: (progress: number, phase: string) => void | Promise<void>;
+  preScrape?: Awaited<ReturnType<typeof scrapeWebsite>>;
+}
+
 export async function runResearchPipeline(
   client: OpenAI,
   config: OpenRouterConfig,
   lead: LeadPayload,
+  options?: ResearchPipelineOptions,
 ): Promise<ResearchResult> {
-  const scrape = await scrapeWebsite(lead.domain)
+  const onProgress = options?.onProgress;
+  const scrape =
+    options?.preScrape ??
+    (await scrapeWebsite(lead.domain, async (event) => {
+      if (event.phase === 'crawl_start') await onProgress?.(event.progress, 'crawl');
+      if (event.phase === 'crawl_page') await onProgress?.(event.progress, 'crawl');
+      if (event.phase === 'crawl_done') await onProgress?.(event.progress, 'crawl');
+    }));
+
+  await onProgress?.(50, 'analyze');
 
   const docUser = `Company: ${lead.companyName}
 Uploaded document filenames (metadata only): ${lead.documents.length ? lead.documents.join(', ') : 'none'}
@@ -204,18 +220,20 @@ Return JSON only:
 {"documentInsights":["..."]}
 Infer likely discovery themes from filenames (3-5 bullets).`
 
+  const locationHint = [lead.country, lead.city].filter(Boolean).join(', ') || lead.country || 'unknown';
   const webUser = `Company: ${lead.companyName}
 Industry: ${lead.industry}
-Country: ${lead.country}
+Location (country / city): ${locationHint}
 Website URL: ${scrape.url}
+Pages crawled: ${scrape.pages?.map((p) => p.path).join(', ') || '/'}
 ${scrape.error ? `Scrape note: ${scrape.error}` : ''}
 
-Website text excerpt:
+Website text (multiple pages):
 ${scrape.excerpt || '(empty)'}
 
 Return JSON only:
 {"webInsights":["..."],"competitors":["..."]}
-Provide 4-6 webInsights bullets and 3-5 competitor names/programs relevant to AI readiness in this vertical.`
+Provide 4-6 webInsights bullets. List 3-5 real or typical competitors in the same industry and region (${locationHint}) — companies a buyer would compare against ${lead.companyName}.`
 
   const [webRaw, docRaw] = await Promise.all([
     complete(
@@ -249,6 +267,8 @@ Provide 4-6 webInsights bullets and 3-5 competitor names/programs relevant to AI
   } catch {
     documentInsights = [docRaw.slice(0, 400)]
   }
+
+  await onProgress?.(72, 'brief');
 
   const briefUser = `Company: ${lead.companyName}
 Industry: ${lead.industry}

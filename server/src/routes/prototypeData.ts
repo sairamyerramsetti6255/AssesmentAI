@@ -12,6 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { requireDb } from '../lib/db.js';
 import { demoDocumentContent, readLeadDocumentFile, saveLeadDocumentFile } from '../lib/documentStore.js';
 import { getClientResponseRows, syncClientResponseRows } from '../lib/clientResponses.js';
+import { notifyAssessmentReceived } from '../lib/zeptomail.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -639,6 +640,7 @@ router.put('/portal/:token/client-responses', async (req: Request, res: Response
       .single();
     if (error) throw error;
 
+    const alreadySubmitted = Boolean((lead as Record<string, unknown>).client_assessment_submitted_at);
     await syncClientResponseRows({
       leadId: lead.id as string,
       answers,
@@ -648,6 +650,17 @@ router.put('/portal/:token/client-responses', async (req: Request, res: Response
       submitted: submitted === true,
       existingStartedAt: (lead as Record<string, unknown>).client_assessment_started_at as string | null,
     });
+
+    if (submitted === true && !alreadySubmitted) {
+      const remarks = String((lead as Record<string, unknown>).intake_remarks ?? '');
+      const contactName = remarks.match(/^Contact:\s*(.+)$/m)?.[1]?.trim()
+        || String((lead as Record<string, unknown>).company_name ?? 'there');
+      await notifyAssessmentReceived({
+        toEmail: String((lead as Record<string, unknown>).client_email ?? ''),
+        toName: contactName,
+        companyName: String((lead as Record<string, unknown>).company_name ?? ''),
+      });
+    }
 
     res.json(data);
   } catch (e) { err(res, e); }

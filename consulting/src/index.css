@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+  --color-pbs-50: #e9f2f9;
+  --color-pbs-100: #d2e5f3;
+  --color-pbs-200: #a5cbe7;
+  --color-pbs-300: #6baed6;
+  --color-pbs-400: #3d96cb;
+  --color-pbs-500: #1a7fd4;
+  --color-pbs-600: #0066b3;
+  --color-pbs-700: #004f8c;
+  --color-pbs-800: #0c2340;
+  --color-pbs-900: #061628;
+  --color-pbs-navy: #0f1f35;
+  --color-pbs-warm: #f6f5f2;
+  --color-pbs-line: #e2e0da;
+  --color-pbs-gold: #b8955c;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--color-pbs-warm);
+  color: var(--color-pbs-900);
+  font-family: var(--font-sans);
+}
+
+#root {
+  min-height: 100vh;
+}

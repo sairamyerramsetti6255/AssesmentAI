@@ -25,6 +25,7 @@ import mastersRoutes from './routes/masters.js';
 import portalRoutes from './routes/portal.js';
 import prototypeAiRoutes from './routes/prototypeAi.js';
 import prototypeDataRoutes from './routes/prototypeData.js';
+import publicAssessmentRoutes from './routes/publicAssessment.js';
 import { verifyDbConnection } from './lib/db.js';
 import { demoStore } from './lib/demoStore.js';
 import { getOpenRouterConfigFromEnv } from './lib/openrouter/openrouterClient.js';
@@ -103,6 +104,9 @@ app.use('/api', prototypeAiRoutes);
 
 /** Prototype UI — Neon data routes */
 app.use('/api/proto', prototypeDataRoutes);
+
+/** Public consulting site — self-serve assessment */
+app.use('/api/public', publicAssessmentRoutes);
 
 app.use('/api/masters', mastersRoutes);
 app.use('/api/portal', portalRoutes);

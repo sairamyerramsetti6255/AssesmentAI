@@ -6,6 +6,8 @@ dist/
 .env.local
 .env.*
 !.env.example
+!**/.env.example
+!consulting/.env.production
 prototype/.env
 *.log
 .DS_Store
