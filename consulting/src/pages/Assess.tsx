@@ -107,14 +107,13 @@ export function Assess() {
       try {
         const status = await fetchResearchStatus(token)
         setResearchStatus({
-          progress: status.progress,
-          done: status.done,
-          message: status.message,
-          phase: status.phase,
+          progress: status.done ? 78 : status.progress,
+          done: false,
+          message: status.done ? 'Writing your questions…' : status.message,
+          phase: status.done ? 'brief' : status.phase,
           pagesCrawled: status.pagesCrawled,
           maxPages: status.maxPages,
           currentPath: status.currentPath,
-          engine: status.engine,
         })
         if (status.done) setResearchActive(false)
       } catch {
@@ -147,27 +146,35 @@ export function Assess() {
   }
 
   const prepareQuestions = async (introAnswer: string) => {
+    setError('')
     setPhase('preparing')
-    setResearchActive(true)
+    setResearchActive(Boolean(form.domain.trim()))
     setResearchStatus({
-      progress: 8,
+      progress: 12,
       done: false,
       message: form.domain.trim()
-        ? 'Reading your website and preparing questions from what you told us…'
-        : 'Preparing questions from what you told us…',
-      phase: 'crawl',
-      pagesCrawled: 0,
-      maxPages: 6,
+        ? 'Reading your website…'
+        : 'Writing your questions from what you told us…',
+      phase: form.domain.trim() ? 'crawl' : 'brief',
     })
     if (form.domain.trim()) {
       await runCompanyResearch(token)
     }
+    setResearchActive(false)
+    setResearchStatus({
+      progress: 88,
+      done: false,
+      message: 'Writing your questions…',
+      phase: 'brief',
+    })
     const generated = await generateQuestions(token, introAnswer)
     const rest = generated.questions.filter((question) => question.id !== CLIENT_VOICE_INTRO_ID)
-    setQuestions(rest.length ? rest : generated.questions)
+    if (!rest.length) {
+      throw new Error('Questions were not created. Please try again.')
+    }
+    setQuestions(rest)
     setWarning(generated.warning ?? '')
     setStep(0)
-    setResearchActive(false)
     setResearchStatus(null)
     setPhase('questions')
   }
@@ -322,21 +329,37 @@ export function Assess() {
         )}
 
         {phase === 'preparing' && (
-          <div className="space-y-5">
+          <div className="space-y-6">
             <WebsiteResearchLoader
               status={
                 researchStatus ?? {
-                  progress: 10,
+                  progress: 12,
                   done: false,
-                  message: 'Reading your website and preparing your questions…',
+                  message: 'Reading your website…',
                   phase: 'crawl',
                 }
               }
-              active
+              active={!error}
             />
-            <p className="text-sm text-pbs-700">
-              This uses your spoken answer together with your website. The questions come next.
-            </p>
+            {error && (
+              <div className="mx-auto max-w-lg space-y-4 rounded-3xl border border-pbs-line bg-white p-8 text-center">
+                <p className="text-rose-800">{error}</p>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    const introAnswer = String(answers[CLIENT_VOICE_INTRO_ID] ?? '').trim()
+                    setBusy(true)
+                    void prepareQuestions(introAnswer)
+                      .catch((err) => setError(err instanceof Error ? err.message : 'Could not continue'))
+                      .finally(() => setBusy(false))
+                  }}
+                  className="rounded-full bg-pbs-600 px-6 py-3 font-semibold text-white disabled:opacity-50"
+                >
+                  {busy ? 'Trying again…' : 'Try again'}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
