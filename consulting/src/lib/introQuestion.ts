@@ -3,7 +3,7 @@ import type { PublicQuestion } from './api.ts'
 export const CLIENT_VOICE_INTRO_ID = 'client-voice-intro'
 
 export const CLIENT_VOICE_INTRO_TEXT =
-  'Tell us about yourself and your business. Speak about what you do, the problems you want to solve, and what you hope to improve.'
+  'Tell us about you and your business: what you do, the problems to solve, and what you want to improve.'
 
 export function createIntroQuestion(): PublicQuestion {
   return {

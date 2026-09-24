@@ -34,11 +34,6 @@ export default function LoginPage() {
     }
   };
 
-  const demoLogin = (demoEmail: string, demoPassword: string) => {
-    setEmail(demoEmail);
-    setPassword(demoPassword);
-  };
-
   return (
     <div className="flex min-h-screen bg-white">
       <div className="hidden w-1/2 flex-col justify-between bg-brand-navy p-12 text-white lg:flex">
@@ -101,21 +96,6 @@ export default function LoginPage() {
                 {loading ? 'Signing in...' : 'Sign In'}
               </Button>
             </form>
-
-            <div className="mt-6 border-t border-brand-cream pt-5">
-              <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-brand-slate">Demo accounts</p>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  ['Admin', 'admin@pbshope.com', 'admin123'],
-                  ['Manager', 'manager@pbshope.com', 'manager123'],
-                  ['Rep', 'rep@pbshope.com', 'rep123'],
-                ].map(([label, em, pw]) => (
-                  <Button key={label} type="button" variant="outline" size="sm" onClick={() => demoLogin(em, pw)}>
-                    {label}
-                  </Button>
-                ))}
-              </div>
-            </div>
           </div>
         </div>
       </div>

@@ -65,6 +65,7 @@ export default function ClientPortalPage() {
     if (q.question_type === 'rating') body.rating_value = rating;
     if (q.question_type === 'text' || q.question_type === 'voice') body.text_answer = text;
     if (q.question_type === 'multi_select') body.text_answer = multi;
+    if (index >= questions.length - 1) body.complete = true;
     await saveMutation.mutateAsync(body);
     if (index < questions.length - 1) {
       setIndex((i) => i + 1);
@@ -97,7 +98,7 @@ export default function ClientPortalPage() {
         <AppLogo />
         <CheckCircle2 className="mt-6 h-12 w-12 text-emerald-600" />
         <h1 className="mt-4 text-xl font-semibold text-brand-navy">Thank you</h1>
-        <p className="mt-2 text-brand-slate">Your responses for {data.company_name} have been submitted.</p>
+        <p className="mt-2 text-brand-slate">Your responses for {data.company_name} have been submitted. A confirmation is on its way to the contact email on this assessment.</p>
       </div>
     );
   }

@@ -90,8 +90,11 @@ export interface RecordingSession {
   ready: Promise<boolean>
   /** 0–1 microphone level while recording. */
   onLevel?: (level: number) => void
-  stop: () => Promise<Blob | null>
+  stop: () => Promise<{ blob: Blob | null; speechMs: number }>
 }
+
+/** Quiet speech and room murmur stay under this. Normal talking is above it. */
+const SPEECH_RMS = 0.03
 
 function pickMime(): string {
   const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
@@ -99,12 +102,14 @@ function pickMime(): string {
 }
 
 /** One microphone stream, recorded until stop. Do not start a second recognizer on the same mic. */
-export function startRecording(onLevel?: (level: number) => void): RecordingSession {
+export function startRecording(onLevel?: (level: number) => void, ignoreQuiet = false): RecordingSession {
   const chunks: Blob[] = []
   let stream: MediaStream | null = null
   let recorder: MediaRecorder | null = null
   let audioContext: AudioContext | null = null
   let levelTimer: ReturnType<typeof setInterval> | null = null
+  let speechMs = 0
+  let lastTick = 0
 
   const ready = (async () => {
     if (!microphoneSupported()) return false
@@ -113,7 +118,7 @@ export function startRecording(onLevel?: (level: number) => void): RecordingSess
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true,
+          autoGainControl: !ignoreQuiet,
           channelCount: 1,
         },
       })
@@ -125,22 +130,28 @@ export function startRecording(onLevel?: (level: number) => void): RecordingSess
       recorder.start(250)
 
       const Ctx = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-      if (Ctx && onLevel) {
+      if (Ctx) {
         audioContext = new Ctx()
         const source = audioContext.createMediaStreamSource(stream)
         const analyser = audioContext.createAnalyser()
         analyser.fftSize = 512
         source.connect(analyser)
         const data = new Uint8Array(analyser.fftSize)
+        lastTick = performance.now()
         levelTimer = setInterval(() => {
+          const now = performance.now()
+          const dt = now - lastTick
+          lastTick = now
           analyser.getByteTimeDomainData(data)
           let sum = 0
           for (let i = 0; i < data.length; i++) {
             const sample = (data[i] - 128) / 128
             sum += sample * sample
           }
-          onLevel(Math.min(1, Math.sqrt(sum / data.length) * 4))
-        }, 120)
+          const rms = Math.sqrt(sum / data.length)
+          if (rms >= SPEECH_RMS) speechMs += dt
+          onLevel?.(Math.min(1, rms * 4))
+        }, 80)
       }
       return true
     } catch {
@@ -158,15 +169,17 @@ export function startRecording(onLevel?: (level: number) => void): RecordingSess
     stream = null
   }
 
-  const stop = async (): Promise<Blob | null> => {
+  const stop = async (): Promise<{ blob: Blob | null; speechMs: number }> => {
     const ok = await ready
+    const heard = speechMs
     if (!ok || !recorder) {
       cleanup()
-      return null
+      return { blob: null, speechMs: heard }
     }
     if (recorder.state === 'inactive') {
       cleanup()
-      return chunks.length ? new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }) : null
+      const blob = chunks.length ? new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }) : null
+      return { blob, speechMs: heard }
     }
     const blob = await new Promise<Blob | null>((resolve) => {
       const active = recorder!
@@ -184,13 +197,93 @@ export function startRecording(onLevel?: (level: number) => void): RecordingSess
       }, 180)
     })
     cleanup()
-    return blob
+    return { blob, speechMs: heard }
   }
 
   return { ready, stop }
 }
 
+function encodeWav(samples: Float32Array, sampleRate: number): Blob {
+  const buffer = new ArrayBuffer(44 + samples.length * 2)
+  const view = new DataView(buffer)
+  const write = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i))
+  }
+  write(0, 'RIFF')
+  view.setUint32(4, 36 + samples.length * 2, true)
+  write(8, 'WAVE')
+  write(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * 2, true)
+  view.setUint16(32, 2, true)
+  view.setUint16(34, 16, true)
+  write(36, 'data')
+  view.setUint32(40, samples.length * 2, true)
+  let offset = 44
+  for (let i = 0; i < samples.length; i++) {
+    const sample = Math.max(-1, Math.min(1, samples[i]))
+    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true)
+    offset += 2
+  }
+  return new Blob([buffer], { type: 'audio/wav' })
+}
+
+/** Drops murmur and quiet audio, then splits the rest into clips under 30 seconds. */
+export async function speechWavChunks(blob: Blob): Promise<Blob[]> {
+  const ctx = new AudioContext()
+  try {
+    const audio = await ctx.decodeAudioData(await blob.arrayBuffer())
+    const rate = audio.sampleRate
+    const data = audio.getChannelData(0)
+    const frame = Math.max(1, Math.floor(rate * 0.02))
+    const kept: number[] = []
+    let hang = 0
+    for (let i = 0; i < data.length; i += frame) {
+      const end = Math.min(data.length, i + frame)
+      let sum = 0
+      for (let j = i; j < end; j++) sum += data[j] * data[j]
+      const rms = Math.sqrt(sum / (end - i))
+      if (rms >= SPEECH_RMS) hang = 6
+      else if (hang > 0) hang -= 1
+      if (rms >= SPEECH_RMS || hang > 0) {
+        for (let j = i; j < end; j++) kept.push(data[j])
+      }
+    }
+    if (kept.length < rate * 0.7) return []
+    const merged = Float32Array.from(kept)
+    const maxSamples = rate * 24
+    const chunks: Blob[] = []
+    for (let i = 0; i < merged.length; i += maxSamples) {
+      chunks.push(encodeWav(merged.subarray(i, Math.min(merged.length, i + maxSamples)), rate))
+    }
+    return chunks
+  } catch {
+    return []
+  } finally {
+    await ctx.close()
+  }
+}
+
+/** Full clip as wav so OpenRouter can hear it. Quiet frames are kept. */
+export async function audioBlobToWav(blob: Blob): Promise<Blob | null> {
+  const ctx = new AudioContext()
+  try {
+    const audio = await ctx.decodeAudioData(await blob.arrayBuffer())
+    const rate = audio.sampleRate
+    const data = audio.getChannelData(0)
+    const max = Math.min(data.length, rate * 60)
+    return encodeWav(data.subarray(0, max), rate)
+  } catch {
+    return null
+  } finally {
+    await ctx.close()
+  }
+}
+
 export async function transcribeBlobWithSarvam(blob: Blob): Promise<string> {
-  const result = await transcribeAudioBlob(blob, 'unknown')
+  const result = await transcribeAudioBlob(blob, 'en-IN')
   return result.transcript
 }

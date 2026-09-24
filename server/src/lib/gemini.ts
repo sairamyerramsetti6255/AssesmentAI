@@ -153,3 +153,18 @@ export async function geminiTranscribeAudio(
   if (!text) throw new Error('Empty transcription from Gemini');
   return text;
 }
+
+/** English listen-and-summarise with Gemini 2.5. Empty string means no clear speech. */
+export async function geminiSummarizeSpeech(audio: Buffer, mimeType: string): Promise<string> {
+  const text = await geminiTranscribeAudio(
+    audio.toString('base64'),
+    mimeType.split(';')[0] || 'audio/webm',
+    'Listen only to clear English speech. Ignore noise, murmuring, and any other language. ' +
+      'If nobody is speaking clear English, reply with exactly NONE. ' +
+      'Otherwise summarise what they said in 2 to 4 first-person sentences about the person, the business, and the problems they want to solve. ' +
+      'Do not invent names, companies, or facts. Plain text only.',
+  );
+  const summary = text.replace(/^["']|["']$/g, '').trim();
+  if (!summary || /^none\.?$/i.test(summary)) return '';
+  return summary;
+}

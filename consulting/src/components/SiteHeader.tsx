@@ -7,10 +7,10 @@ export function SiteHeader({ cta = true }: { cta?: boolean }) {
     <header className="sticky top-0 z-20 border-b border-white/10 bg-pbs-navy/95 text-white backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-3">
         <Link to="/" className="flex items-center gap-3">
-          <img src={LOGO} alt="PBS" className="h-12 w-12 rounded-full bg-white object-contain" />
+          <img src={LOGO} alt="PBS" className="h-16 w-16 rounded-full bg-white object-contain p-1" />
           <span>
-            <span className="block text-sm font-semibold tracking-wide">Proficient Business Service</span>
-            <span className="block text-xs text-pbs-200">Total I.T. Care</span>
+            <span className="block text-base font-semibold tracking-wide">Proficient Business Service</span>
+            <span className="block text-sm text-pbs-200">Total I.T. Care</span>
           </span>
         </Link>
         {cta && (

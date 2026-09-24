@@ -41,6 +41,18 @@ export function enroll(input: EnrollInput) {
   })
 }
 
+export function chooseSpokenAnswer(input: {
+  question: string
+  options: string[]
+  type: string
+  transcript: string
+}) {
+  return request<{ summary: string; option?: string; options?: string[]; score?: number }>(
+    '/api/public/voice/choose',
+    { method: 'POST', body: JSON.stringify(input) },
+  )
+}
+
 export function cleanVoiceTranscript(transcript: string) {
   return request<{ text: string }>('/api/public/voice/clean', {
     method: 'POST',
@@ -54,6 +66,31 @@ export function fetchSarvamHealth() {
     speechToText: { ok: boolean; message: string; keyKind?: string }
     webCrawl: { ok: boolean; message: string; provider: string }
   }>('/api/public/sarvam/health')
+}
+
+export async function speakAloud(text: string): Promise<Blob> {
+  const response = await fetch(apiUrl('/api/public/speak'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(typeof body.error === 'string' ? body.error : 'Could not speak the question')
+  }
+  return response.blob()
+}
+
+export async function summarizeSpeechWithGemini(blob: Blob): Promise<string> {
+  const form = new FormData()
+  const wav = blob.type.includes('wav')
+  form.append('audio', blob, wav ? 'recording.wav' : 'recording.webm')
+  const response = await fetch(apiUrl('/api/public/gemini/listen'), { method: 'POST', body: form })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(typeof body.error === 'string' ? body.error : 'Could not summarise the recording')
+  }
+  return typeof body.text === 'string' ? body.text.trim() : ''
 }
 
 export async function transcribeAudioBlob(blob: Blob, languageCode = 'en-IN') {

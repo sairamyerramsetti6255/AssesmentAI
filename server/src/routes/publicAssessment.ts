@@ -21,6 +21,8 @@ import {
 } from '../lib/openrouter/aiRun.js';
 import { notifyAssessmentReceived } from '../lib/zeptomail.js';
 import { checkSarvamHealth, transcribeWithSarvam } from '../lib/sarvam.js';
+import { openRouterSummarizeSpeech } from '../lib/openrouter/listen.js';
+import { openRouterSpeak } from '../lib/openrouter/speak.js';
 import { mergeCrawlStatus, parseCrawlStatus, researchMessage } from '../lib/researchStatus.js';
 import { buildClientIntroSummary } from '../lib/researchSummary.js';
 import { scrapeWebsite } from '../lib/openrouter/scrape.js';
@@ -327,11 +329,6 @@ router.post('/assessment/generate', async (req: Request, res: Response) => {
     const token = clean(req.body.token);
     const brief = clean(req.body.brief);
     if (!token) return res.status(400).json({ error: 'token required' });
-    if (brief.length < 15) {
-      return res.status(400).json({
-        error: 'Please share more about your business, activities, and the challenges you want to solve.',
-      });
-    }
 
     const { data: lead, error: leadError } = await db()
       .from('leads')
@@ -625,6 +622,86 @@ router.post('/voice/clean', async (req: Request, res: Response) => {
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Could not summarise the voice';
     console.error('[public/voice/clean]', e);
+    res.status(502).json({ error: message });
+  }
+});
+
+router.post('/voice/choose', async (req: Request, res: Response) => {
+  try {
+    const question = clean(req.body.question);
+    const transcript = clean(req.body.transcript);
+    const type = clean(req.body.type) || 'singlechoice';
+    const options = Array.isArray(req.body.options)
+      ? req.body.options.map((item: unknown) => clean(item)).filter(Boolean)
+      : [];
+    if (!question || transcript.length < 2) {
+      return res.status(400).json({ error: 'question and transcript are required' });
+    }
+    const config = getOpenRouterConfigFromEnv();
+    if (!config) return res.status(503).json({ error: 'AI is not configured on the server.' });
+    const client = createOpenRouterClient(config);
+    const completion = await client.chat.completions.create({
+      model: config.model,
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'user',
+          content:
+            `The customer answered an assessment question by voice. Summarise what they meant in one short sentence. ` +
+            `Then pick the best matching answer. Copy option text exactly from the list. Do not invent an option. ` +
+            `If nothing fits, leave option empty. For a scale, set score from 1 to 10 or 0 if unclear.\n` +
+            `Return JSON: {"summary":"","option":"","options":[],"score":0}\n\n` +
+            `Question: ${question}\nType: ${type}\nOptions: ${options.join(' | ') || '(none)'}\n` +
+            `Customer said: ${transcript.slice(0, 2000)}`,
+        },
+      ],
+    });
+    const raw = completion.choices[0]?.message?.content ?? '{}';
+    const parsed = JSON.parse(raw) as { summary?: string; option?: string; options?: string[]; score?: number };
+    const allowed = new Set(options);
+    const option = parsed.option && allowed.has(parsed.option) ? parsed.option : '';
+    const picked = Array.isArray(parsed.options) ? parsed.options.filter((item) => allowed.has(item)) : [];
+    const score = Number(parsed.score);
+    res.json({
+      summary: clean(parsed.summary).slice(0, 240),
+      option,
+      options: picked,
+      score: score >= 1 && score <= 10 ? score : 0,
+    });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Could not match the spoken answer';
+    console.error('[public/voice/choose]', e);
+    res.status(502).json({ error: message });
+  }
+});
+
+router.post('/speak', async (req: Request, res: Response) => {
+  try {
+    const text = clean(req.body.text);
+    if (!text) return res.status(400).json({ error: 'text required' });
+    const wav = await openRouterSpeak(text);
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(wav);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Could not speak the question';
+    console.error('[public/speak]', e);
+    res.status(502).json({ error: message });
+  }
+});
+
+router.post('/gemini/listen', audioUpload.single('audio'), async (req: Request, res: Response) => {
+  try {
+    const file = req.file;
+    if (!file?.buffer?.length) {
+      return res.status(400).json({ error: 'Upload an audio file as multipart field "audio".' });
+    }
+    const text = await openRouterSummarizeSpeech(file.buffer, file.mimetype || 'audio/wav');
+    res.json({ text });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Could not summarise the recording';
+    console.error('[public/gemini/listen]', e);
     res.status(502).json({ error: message });
   }
 });

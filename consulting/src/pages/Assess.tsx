@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { SiteFooter, SiteHeader } from '../components/SiteHeader.tsx'
+import { SiteHeader } from '../components/SiteHeader.tsx'
+import { QuestionSpeaker } from '../components/QuestionSpeaker.tsx'
 import { VoiceButton } from '../components/VoiceButton.tsx'
 import { WebsiteResearchLoader, type ResearchStatusView } from '../components/WebsiteResearchLoader.tsx'
 import {
-  cleanVoiceTranscript,
   enroll,
   fetchResearchStatus,
+  chooseSpokenAnswer,
   generateQuestions,
   runCompanyResearch,
   saveAnswers,
@@ -24,6 +25,23 @@ interface FormState {
   email: string
   phone: string
 }
+
+const BAHAMAS_INDUSTRIES = [
+  'Tourism and hospitality',
+  'Financial services',
+  'Fishing and marine',
+  'Construction and real estate',
+  'Retail and wholesale',
+  'Transportation and logistics',
+  'Healthcare',
+  'Education',
+  'Government and public sector',
+  'Information technology',
+  'Agriculture',
+  'Energy and utilities',
+  'Professional services',
+  'Other',
+]
 
 const EMPTY: FormState = {
   companyName: '',
@@ -48,27 +66,25 @@ function appendText(current: string, extra: string): string {
   return current.trim() ? `${current.trim()} ${next}` : next
 }
 
-function matchOption(options: string[], spoken: string): string | null {
-  const needle = spoken.toLowerCase()
-  return options.find((option) => needle.includes(option.toLowerCase())) ?? null
+function words(value: string): string[] {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((word) => word.length > 2)
 }
 
-function matchOptions(options: string[], spoken: string): string[] {
-  const direct = options.filter((option) => spoken.toLowerCase().includes(option.toLowerCase()))
-  if (direct.length) return direct
-  const parts = spoken.split(/\band\b|,|;|\bor\b/i).map((part) => part.trim()).filter(Boolean)
-  const picked: string[] = []
-  for (const part of parts) {
-    const hit =
-      options.find(
-        (option) =>
-          part.toLowerCase().includes(option.toLowerCase()) ||
-          option.toLowerCase().includes(part.toLowerCase()),
-      ) ?? null
-    if (hit && !picked.includes(hit)) picked.push(hit)
+function matchOption(options: string[], spoken: string): string | null {
+  const said = words(spoken)
+  if (!said.length) return null
+  let best: { option: string; score: number } | null = null
+  for (const option of options) {
+    const score = words(option).filter((token) => said.some((word) => word === token || word.includes(token) || token.includes(word))).length
+    if (score > 0 && (!best || score > best.score)) best = { option, score }
   }
-  return picked
+  return best?.option ?? null
 }
+
 
 export function Assess() {
   const [phase, setPhase] = useState<Phase>('details')
@@ -84,6 +100,14 @@ export function Assess() {
   const [answers, setAnswers] = useState<Record<string, string | number | string[]>>({})
   const [otherText, setOtherText] = useState<Record<string, string>>({})
   const [emailNote, setEmailNote] = useState('')
+  const [storyText, setStoryText] = useState('')
+  const [industryPick, setIndustryPick] = useState('')
+  const [customIndustry, setCustomIndustry] = useState('')
+  const [barge, setBarge] = useState(0)
+  const [bargeArmed, setBargeArmed] = useState(false)
+  const [voiceNote, setVoiceNote] = useState('')
+  const voiceWait = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const voiceBuf = useRef('')
   const current = questions[step]
   const spokenRef = useRef<Record<string, string>>({})
   const voiceLock = useRef(false)
@@ -96,9 +120,10 @@ export function Assess() {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
+  const resolvedIndustry = industryPick === 'Other' ? customIndustry.trim() : industryPick
   const detailsReady =
     form.companyName.trim() &&
-    form.industry.trim() &&
+    resolvedIndustry &&
     form.contactName.trim() &&
     form.email.trim() &&
     form.phone.trim()
@@ -131,7 +156,7 @@ export function Assess() {
     setError('')
     setBusy(true)
     try {
-      const created = await enroll({ ...form, domain: form.domain.trim() })
+      const created = await enroll({ ...form, industry: resolvedIndustry, domain: form.domain.trim() })
       setToken(created.token)
       setQuestions([createIntroQuestion()])
       setStep(0)
@@ -184,43 +209,45 @@ export function Assess() {
   }
 
   const applyVoice = (spoken: string) => {
-    if (!current) return
-    const type = normalizeType(current.type)
-    const options = current.options ?? []
-    if (type === 'singlechoice') {
-      const match = matchOption(options, spoken)
-      if (match) {
-        setAnswers((prev) => ({ ...prev, [current.id]: match }))
-        return
-      }
-    }
-    if (type === 'multichoice') {
-      const matches = matchOptions(options, spoken)
-      if (matches.length) {
-        setAnswers((prev) => {
-          const existing = Array.isArray(prev[current.id]) ? (prev[current.id] as string[]) : []
-          const merged = [...existing]
-          matches.forEach((item) => {
-            if (!merged.includes(item)) merged.push(item)
-          })
-          return { ...prev, [current.id]: merged }
+    if (!current || phase !== 'questions') return
+    const question = current
+    const type = normalizeType(question.type)
+    voiceBuf.current = appendText(voiceBuf.current, spoken)
+    if (voiceWait.current) clearTimeout(voiceWait.current)
+    voiceWait.current = setTimeout(() => {
+      const transcript = voiceBuf.current.trim()
+      voiceBuf.current = ''
+      if (transcript.length < 2) return
+      void chooseSpokenAnswer({
+        question: question.text,
+        options: question.options ?? [],
+        type,
+        transcript,
+      })
+        .then((result) => {
+          if (result.summary) setVoiceNote(result.summary)
+          if (type === 'singlechoice' && result.option) {
+            void continueWith(question, result.option)
+            return
+          }
+          if (type === 'multichoice' && result.options?.length) {
+            setAnswers((prev) => ({ ...prev, [question.id]: result.options as string[] }))
+            return
+          }
+          if (type === 'scale' && result.score) {
+            void continueWith(question, result.score)
+            return
+          }
+          if (type === 'text') {
+            spokenRef.current[question.id] = result.summary || transcript
+            setAnswers((prev) => ({ ...prev, [question.id]: result.summary || transcript }))
+          }
         })
-        return
-      }
-    }
-    if (type === 'scale') {
-      const score = spoken.match(/\b(10|[1-9])\b/)
-      if (score) {
-        setAnswers((prev) => ({ ...prev, [current.id]: Number(score[1]) }))
-        return
-      }
-    }
-    if (type === 'text') {
-      if (voiceLock.current) return
-      spokenRef.current[current.id] = appendText(spokenRef.current[current.id] ?? '', spoken)
-      return
-    }
-    setOtherText((prev) => ({ ...prev, [current.id]: appendText(prev[current.id] ?? '', spoken) }))
+        .catch(() => {
+          const match = matchOption(question.options ?? [], transcript)
+          if (type === 'singlechoice' && match) void continueWith(question, match)
+        })
+    }, 900)
   }
 
   const answered = (question: PublicQuestion): boolean => {
@@ -231,18 +258,27 @@ export function Assess() {
     return value !== undefined && String(value).trim() !== ''
   }
 
-  const persist = async (submitted: boolean) => {
-    const done = questions.filter((question) => answered(question)).length
+  const persist = async (
+    submitted: boolean,
+    nextAnswers: Record<string, string | number | string[]> = answers,
+  ) => {
+    const done = questions.filter((question) => {
+      const value = nextAnswers[question.id]
+      const note = otherText[question.id]?.trim()
+      if (note) return true
+      if (Array.isArray(value)) return value.length > 0
+      return value !== undefined && String(value).trim() !== ''
+    }).length
     const pct = submitted ? 100 : Math.round((done / Math.max(questions.length, 1)) * 100)
     const richtext: Record<string, string> = {}
     questions.forEach((question) => {
       if (normalizeType(question.type) === 'text') {
-        const value = answers[question.id]
+        const value = nextAnswers[question.id]
         if (typeof value === 'string' && value.trim()) richtext[question.id] = value.trim()
       }
     })
     return saveAnswers(token, {
-      answers,
+      answers: nextAnswers,
       richtext,
       other_text: otherText,
       progress: pct,
@@ -251,22 +287,29 @@ export function Assess() {
   }
 
   const next = async () => {
+    if (phase === 'story') {
+      const voice = (spokenRef.current[CLIENT_VOICE_INTRO_ID] ?? '').trim()
+      const notes = (otherText[CLIENT_VOICE_INTRO_ID] ?? '').trim()
+      setError('')
+      setBusy(true)
+      try {
+        const introAnswer = [voice, notes].filter(Boolean).join('\n')
+        setAnswers((prev) => ({ ...prev, [CLIENT_VOICE_INTRO_ID]: introAnswer }))
+        await prepareQuestions(introAnswer)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not continue')
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
     if (!current || !answered(current)) {
-      setError('Answer this question before continuing. You can speak or select one or more options.')
+      setError('Choose an option before continuing.')
       return
     }
     setError('')
     setBusy(true)
     try {
-      if (phase === 'story') {
-        const introAnswer = String(answers[CLIENT_VOICE_INTRO_ID] ?? '').trim()
-        if (introAnswer.length < 15) {
-          setError('Speak or type a little more about yourself and your business.')
-          return
-        }
-        await prepareQuestions(introAnswer)
-        return
-      }
 
       const last = step === questions.length - 1
       const result = await persist(last)
@@ -287,28 +330,86 @@ export function Assess() {
     }
   }
 
+  const continueWith = async (question: PublicQuestion, value: string | number | string[]) => {
+    const nextAnswers = { ...answers, [question.id]: value }
+    setAnswers(nextAnswers)
+    setError('')
+    setBusy(true)
+    try {
+      const last = step === questions.length - 1
+      const result = await persist(last, nextAnswers)
+      if (last) {
+        setEmailNote(
+          result.emailSent
+            ? `A confirmation is on its way to ${form.email}.`
+            : 'Your answers are saved. We could not send the email just now, and a consultant can still follow up.',
+        )
+        setPhase('done')
+      } else {
+        setStep((valueIndex) => valueIndex + 1)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not continue')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    setVoiceNote('')
+    setBargeArmed(false)
+    voiceBuf.current = ''
+  }, [current?.id])
+
   const isIntroStep = current?.id === CLIENT_VOICE_INTRO_ID
+  const spokenScript = current && (phase === 'story' || phase === 'questions') ? current.text : ''
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex h-dvh flex-col overflow-hidden">
       <SiteHeader cta={false} />
-      <main className="mx-auto w-full max-w-2xl flex-1 px-5 py-10">
+      <main className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col overflow-hidden px-5 py-3">
         {phase === 'details' && (
           <form
-            className="space-y-4"
+            className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden"
             onSubmit={(event) => {
               event.preventDefault()
               if (detailsReady) void continueFromDetails()
             }}
           >
-            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-pbs-600">Free assessment</p>
-            <h1 className="text-3xl font-semibold text-pbs-navy">Company and contact</h1>
-            <p className="text-pbs-700">
-              After you submit, your first question is a short voice-friendly overview of your business. If you add a
-              website URL, we use it to tailor the rest of the assessment.
-            </p>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-pbs-600">Free assessment</p>
+            <h1 className="text-2xl font-semibold text-pbs-navy">Company and contact</h1>
             <Field label="Company name" value={form.companyName} onChange={(value) => setField('companyName', value)} />
-            <Field label="Industry" value={form.industry} onChange={(value) => setField('industry', value)} />
+            <label className="block">
+              <span className="mb-1 block text-sm font-semibold text-pbs-800">Industry</span>
+              <select
+                required
+                value={industryPick}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setIndustryPick(value)
+                  setField('industry', value === 'Other' ? customIndustry : value)
+                }}
+                className="w-full rounded-xl border border-pbs-line bg-white px-3 py-2"
+              >
+                <option value="">Select an industry in the Bahamas</option>
+                {BAHAMAS_INDUSTRIES.map((industry) => (
+                  <option key={industry} value={industry}>
+                    {industry}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {industryPick === 'Other' ? (
+              <Field
+                label="Your industry"
+                value={customIndustry}
+                onChange={(value) => {
+                  setCustomIndustry(value)
+                  setField('industry', value)
+                }}
+                placeholder="Type your industry"
+              />
+            ) : null}
             <Field
               label="Your website URL"
               required={false}
@@ -366,7 +467,7 @@ export function Assess() {
         )}
 
         {(phase === 'story' || phase === 'questions') && current && (
-          <div className="space-y-5">
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
             {phase === 'questions' && (
             <div>
               <div className="mb-2 flex items-center justify-between text-sm text-pbs-700">
@@ -379,7 +480,7 @@ export function Assess() {
             </div>
             )}
             {warning && <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">{warning}</p>}
-            <div className="rounded-3xl border border-pbs-line bg-white p-6">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-pbs-line bg-white p-4">
               <div className="mb-3 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-wide">
                 {isIntroStep && <span className="rounded-full bg-pbs-50 px-2 py-1 text-pbs-700">Your story</span>}
                 {!isIntroStep && current.is_mandatory && (
@@ -389,61 +490,124 @@ export function Assess() {
                   <span className="rounded-full bg-pbs-50 px-2 py-1 text-pbs-700">For your situation</span>
                 )}
               </div>
-              <h1 className="text-2xl font-semibold leading-snug text-pbs-navy">{current.text}</h1>
-              <div className="mt-6">
-                <QuestionControl
-                  question={current}
-                  value={answers[current.id]}
-                  note={otherText[current.id] ?? ''}
-                  onChange={(value) => {
-                    if (typeof value === 'string') spokenRef.current[current.id] = value
-                    setAnswers((prev) => ({ ...prev, [current.id]: value }))
-                  }}
-                  onNote={(value) => setOtherText((prev) => ({ ...prev, [current.id]: value }))}
-                />
+              {voiceNote ? <p className="mt-2 text-sm text-pbs-700">{voiceNote}</p> : null}
+              <div className="mt-3 flex items-start gap-3">
+                <h1 className="flex-1 text-lg font-semibold leading-snug text-pbs-navy">{current.text}</h1>
+                {spokenScript ? (
+                  <QuestionSpeaker
+                    script={spokenScript}
+                    activeKey={current.id}
+                    interruptKey={barge}
+                    onPlaybackStart={() => {
+                      window.setTimeout(() => setBargeArmed(true), 450)
+                    }}
+                  />
+                ) : null}
               </div>
-              <div className="mt-6">
-                <VoiceButton
-                  autoStart
-                  listenKey={current.id}
-                  maxListenMs={isIntroStep ? 60_000 : undefined}
-                  onFinal={(text) => {
-                    applyVoice(text)
-                  }}
-                  onStarted={() => {
-                    voiceLock.current = false
-                  }}
-                  onStopped={(replacement) => {
-                    if (!current || normalizeType(current.type) !== 'text') return
-                    voiceLock.current = true
-                    const questionId = current.id
-                    const raw = (replacement?.trim() || spokenRef.current[questionId] || '').trim()
-                    if (raw.length < 8) return
-                    spokenRef.current[questionId] = raw
-                    setAnswers((prev) => ({ ...prev, [questionId]: raw }))
-                    setBusy(true)
-                    void cleanVoiceTranscript(raw)
-                      .then((result) => {
-                        const text = result.text.trim()
-                        if (!text) return
-                        spokenRef.current[questionId] = text
-                        setAnswers((prev) => ({ ...prev, [questionId]: text }))
-                      })
-                      .catch(() => {})
-                      .finally(() => setBusy(false))
-                  }}
-                />
-              </div>
+              {isIntroStep ? (
+                <div className="mt-8">
+                  <VoiceButton
+                    autoStart
+                    captureOnly
+                    bargeArmed={bargeArmed}
+                    listenKey={current.id}
+                    onBargeIn={() => {
+                      setBargeArmed(false)
+                      setBarge((value) => value + 1)
+                    }}
+                    maxListenMs={60_000}
+                    onFinal={() => {}}
+                    onStopped={(text) => {
+                      const next = (text ?? '').trim()
+                      if (!next) return
+                      const prev = (spokenRef.current[current.id] ?? '').trim()
+                      const combined = prev ? `${prev} ${next}` : next
+                      spokenRef.current[current.id] = combined
+                      setStoryText(combined)
+                      setError('')
+                    }}
+                    onReset={() => {
+                      spokenRef.current[current.id] = ''
+                      setStoryText('')
+                    }}
+                  />
+                  {storyText ? (
+                    <p className="mt-4 rounded-2xl bg-pbs-50 px-4 py-3 text-sm leading-6 text-pbs-navy">{storyText}</p>
+                  ) : null}
+                  <label className="mt-8 block">
+                    <span className="text-sm font-semibold text-pbs-navy">Extra notes (optional)</span>
+                    <textarea
+                      rows={4}
+                      value={otherText[current.id] ?? ''}
+                      onChange={(event) =>
+                        setOtherText((prev) => ({ ...prev, [current.id]: event.target.value }))
+                      }
+                      placeholder="Optional. Type anything else you want us to know."
+                      className="mt-2 w-full rounded-xl border border-pbs-line px-3 py-2"
+                    />
+                  </label>
+                </div>
+              ) : (
+                <>
+                  <div className="mt-6">
+                    <QuestionControl
+                      question={current}
+                      value={answers[current.id]}
+                      note={otherText[current.id] ?? ''}
+                      onChange={(value) => {
+                        const type = normalizeType(current.type)
+                        if (type === 'singlechoice' || type === 'scale') {
+                          void continueWith(current, value)
+                          return
+                        }
+                        if (typeof value === 'string') spokenRef.current[current.id] = value
+                        setAnswers((prev) => ({ ...prev, [current.id]: value }))
+                      }}
+                      onNote={(value) => setOtherText((prev) => ({ ...prev, [current.id]: value }))}
+                    />
+                  </div>
+                  <div className="mt-6">
+                    <VoiceButton
+                      autoStart
+                      bargeArmed={bargeArmed}
+                      listenKey={current.id}
+                      onBargeIn={() => {
+                        setBargeArmed(false)
+                        setBarge((value) => value + 1)
+                      }}
+                      onFinal={(text) => {
+                        applyVoice(text)
+                      }}
+                      onStarted={() => {
+                        voiceLock.current = false
+                      }}
+                      onStopped={(replacement) => {
+                        if (!current || normalizeType(current.type) !== 'text') return
+                        voiceLock.current = true
+                        const questionId = current.id
+                        const raw = (replacement?.trim() || '').trim()
+                        if (raw.length < 8) return
+                        spokenRef.current[questionId] = raw
+                        setAnswers((prev) => ({ ...prev, [questionId]: raw }))
+                      }}
+                    />
+                  </div>
+                </>
+              )}
             </div>
             {error && <p className="rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>}
             <div className="flex gap-3">
               <button
                 type="button"
-                disabled={(phase === 'story' ? false : step === 0) || busy}
+                disabled={busy}
                 onClick={() => {
                   setError('')
                   if (phase === 'story') {
                     setPhase('details')
+                    return
+                  }
+                  if (step === 0) {
+                    setPhase('story')
                     return
                   }
                   setStep((value) => value - 1)
@@ -485,7 +649,6 @@ export function Assess() {
           </div>
         )}
       </main>
-      <SiteFooter />
     </div>
   )
 }
@@ -514,7 +677,7 @@ function Field({
         value={value}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-xl border border-pbs-line bg-white px-3 py-2.5"
+        className="w-full rounded-xl border border-pbs-line bg-white px-3 py-2"
       />
     </label>
   )
@@ -525,7 +688,7 @@ function QuestionControl({
   value,
   note,
   onChange,
-  onNote,
+  onNote: _onNote,
 }: {
   question: PublicQuestion
   value: string | number | string[] | undefined
@@ -559,7 +722,7 @@ function QuestionControl({
   if (type === 'singlechoice' || type === 'multichoice') {
     const selected = Array.isArray(value) ? value : value ? [String(value)] : []
     return (
-      <div className="space-y-2">
+      <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden">
         {type === 'multichoice' && (
           <p className="text-sm font-medium text-pbs-700">Select all that apply</p>
         )}
@@ -573,7 +736,7 @@ function QuestionControl({
                 if (type === 'singlechoice') onChange(option)
                 else onChange(on ? selected.filter((item) => item !== option) : [...selected, option])
               }}
-              className={`block w-full rounded-xl border px-4 py-3 text-left ${
+              className={`block w-full rounded-lg border px-3 py-1.5 text-left text-sm ${
                 on ? 'border-pbs-600 bg-pbs-50' : 'border-pbs-line bg-white'
               }`}
             >
@@ -581,13 +744,6 @@ function QuestionControl({
             </button>
           )
         })}
-        <textarea
-          value={note}
-          onChange={(event) => onNote(event.target.value)}
-          rows={3}
-          placeholder="Or add a spoken or typed note"
-          className="mt-3 w-full rounded-xl border border-pbs-line px-3 py-2"
-        />
       </div>
     )
   }

@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
-import { DEMO_CREDENTIALS } from '../data/admin-master-data'
 import { useApp } from '../context/AppContext'
 import { PbsLogo } from '../components/brand/PbsLogo'
 import { Button, Input } from '../components/ui'
@@ -15,8 +14,6 @@ export function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [showDemo, setShowDemo] = useState(false)
-
   if (currentUser) {
     return <Navigate to={from} replace />
   }
@@ -99,36 +96,6 @@ export function Login() {
               Continue
             </Button>
           </form>
-
-          <div className="mt-6 border-t border-pbs-line pt-5">
-            <button
-              type="button"
-              onClick={() => setShowDemo((v) => !v)}
-              className="text-xs font-medium text-stone-500 hover:text-pbs-700"
-            >
-              {showDemo ? 'Hide' : 'Show'} demo accounts
-            </button>
-            {showDemo && (
-              <ul className="mt-3 space-y-2 text-xs text-stone-600">
-                {DEMO_CREDENTIALS.map((c) => (
-                  <li key={c.email}>
-                    <button
-                      type="button"
-                      className="text-left hover:text-pbs-700"
-                      onClick={() => {
-                        setEmail(c.email)
-                        setPassword(c.password)
-                      }}
-                    >
-                      <span className="font-medium text-pbs-800">{c.role}</span>
-                      <span className="text-stone-400"> — </span>
-                      {c.email}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
 
           <p className="mt-8 text-center text-xs text-stone-500">
             Clients use their secure assessment link.{' '}

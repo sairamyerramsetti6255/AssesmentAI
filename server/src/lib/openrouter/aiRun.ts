@@ -362,7 +362,7 @@ Document themes: ${research.documentInsights.slice(0, 5).join('; ')}
 
 Populate taxonomy + generate exactly 10 assessment questions in one JSON object.
 "options" = client-facing choices (4-5 each). Do NOT include "Other".
-Keep option labels short (under 8 words).`
+Each question is one short sentence, 14 words or fewer, specific to this industry. Each option is under 6 words.`
 
   const parsed = await completeJson<AssessmentGenerationResult>(
     client,

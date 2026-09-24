@@ -18,7 +18,9 @@ Rules:
 - Each question maps to one taxonomyPillar: "Technical Pain Points" | "Non-Technical / Operational Pain Areas" | "Process Improvements"
 - domainContext: short label from that pillar's taxonomy
 - suggestedOptions: 2–3 extra options executives may add later (not shown to client by default)
-- Questions must be specific to the [User Domain]
+- Questions must be specific to the [User Domain] and to that industry in the Bahamas
+- Each question is ONE short sentence, 14 words or fewer. No preamble.
+- Each option is 6 words or fewer
 
 Return valid JSON only:
 {
