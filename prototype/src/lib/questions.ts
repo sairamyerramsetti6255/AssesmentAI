@@ -73,23 +73,43 @@ export function mandatoryToAssessmentQuestion(mq: MandatoryQuestion): Assessment
   })
 }
 
-/** Prepend admin mandatory questions before all other assessment questions */
+/** Place each mandatory question between AI-generated questions. */
+export function interleaveMandatory<T>(generated: T[], mandatory: T[]): T[] {
+  if (!mandatory.length) return generated
+  if (!generated.length) return mandatory
+  const out: T[] = []
+  const gap = (generated.length + mandatory.length) / mandatory.length
+  let nextAt = Math.max(1, Math.round(gap / 2))
+  let generatedIndex = 0
+  let mandatoryIndex = 0
+  while (generatedIndex < generated.length || mandatoryIndex < mandatory.length) {
+    const placeMandatory =
+      mandatoryIndex < mandatory.length &&
+      (generatedIndex >= generated.length || out.length >= nextAt)
+    if (placeMandatory) {
+      out.push(mandatory[mandatoryIndex])
+      mandatoryIndex += 1
+      nextAt += Math.max(2, Math.round(gap))
+      continue
+    }
+    out.push(generated[generatedIndex])
+    generatedIndex += 1
+  }
+  return out
+}
+
+/** Mix admin mandatory questions through the AI-generated assessment questions */
 export function mergeMandatoryQuestions(
   generated: AssessmentQuestion[],
   mandatory: MandatoryQuestion[],
 ): AssessmentQuestion[] {
   if (mandatory.length === 0) return normalizeSortOrder(generated)
-  const optional = stripMandatoryFromAssessment(generated, mandatory)
-  const prefix = mandatory.map((mq, i) => ({
-    ...mandatoryToAssessmentQuestion(mq),
-    sortOrder: i,
-  }))
-  const rest = optional.map((q, i) => ({
+  const optional = stripMandatoryFromAssessment(generated, mandatory).map((q) => ({
     ...q,
     isMandatory: false,
-    sortOrder: mandatory.length + i,
   }))
-  return normalizeSortOrder([...prefix, ...rest])
+  const required = mandatory.map((mq) => mandatoryToAssessmentQuestion(mq))
+  return normalizeSortOrder(interleaveMandatory(optional, required))
 }
 
 export function syncAssessmentWithMandatory(

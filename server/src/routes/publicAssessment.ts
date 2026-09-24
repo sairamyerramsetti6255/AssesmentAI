@@ -1,7 +1,7 @@
 /**
  * Public free-assessment enrollment. No staff login.
  * Creates a Neon lead, mixes admin mandatory questions with gap-filling AI questions
- * (10 total), and emails the client after submit.
+ * and emails the client after submit.
  */
 
 import { Router, Request, Response } from 'express';
@@ -32,7 +32,7 @@ const audioUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024 },
 });
-const MAX_QUESTIONS = 10;
+const MAX_QUESTIONS = 14;
 export const CLIENT_VOICE_INTRO_ID = 'client-voice-intro';
 const CLIENT_VOICE_INTRO_TEXT =
   'Tell us about your business and day-to-day activities, and the technical and growth challenges you want to solve. Speak for up to about a minute — we will not ask again for what you cover here.';
@@ -43,6 +43,30 @@ function db() {
 
 function clean(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function interleaveMandatory<T>(generated: T[], mandatory: T[]): T[] {
+  if (!mandatory.length) return generated;
+  if (!generated.length) return mandatory;
+  const out: T[] = [];
+  const gap = (generated.length + mandatory.length) / mandatory.length;
+  let nextAt = Math.max(1, Math.round(gap / 2));
+  let generatedIndex = 0;
+  let mandatoryIndex = 0;
+  while (generatedIndex < generated.length || mandatoryIndex < mandatory.length) {
+    const placeMandatory =
+      mandatoryIndex < mandatory.length &&
+      (generatedIndex >= generated.length || out.length >= nextAt);
+    if (placeMandatory) {
+      out.push(mandatory[mandatoryIndex]);
+      mandatoryIndex += 1;
+      nextAt += Math.max(2, Math.round(gap));
+      continue;
+    }
+    out.push(generated[generatedIndex]);
+    generatedIndex += 1;
+  }
+  return out;
 }
 
 function domainOf(raw: string): string {
@@ -444,34 +468,35 @@ router.post('/assessment/generate', async (req: Request, res: Response) => {
       is_mandatory: true,
     };
 
-    const bodyRows = [
-      ...mandatory.map((row, index) => ({
-        id: randomUUID(),
-        lead_id: lead.id,
-        sort_order: index + 1,
-        taxonomy_pillar: 'Non-Technical / Operational Pain Areas',
-        domain_context: 'Mandatory baseline',
-        category: 'Governance & Compliance',
-        text: row.text,
-        type: row.type || 'singlechoice',
-        options: Array.isArray(row.options) ? row.options : [],
-        suggested_options: [],
-        is_mandatory: true,
-      })),
-      ...generated.map((question, index) => ({
-        id: randomUUID(),
-        lead_id: lead.id,
-        sort_order: mandatory.length + index + 1,
-        taxonomy_pillar: question.taxonomyPillar || 'Technical Pain Points',
-        domain_context: question.domainContext || '',
-        category: question.category || 'Technology Stack',
-        text: question.text,
-        type: question.type || 'singlechoice',
-        options: question.options ?? [],
-        suggested_options: [],
-        is_mandatory: false,
-      })),
-    ].slice(0, MAX_QUESTIONS);
+    const mandatoryRowsForLead = mandatory.map((row) => ({
+      id: randomUUID(),
+      lead_id: lead.id,
+      sort_order: 0,
+      taxonomy_pillar: 'Non-Technical / Operational Pain Areas',
+      domain_context: 'Mandatory baseline',
+      category: 'Governance & Compliance',
+      text: row.text,
+      type: row.type || 'singlechoice',
+      options: Array.isArray(row.options) ? row.options : [],
+      suggested_options: [] as string[],
+      is_mandatory: true,
+    }));
+    const generatedRows = generated.map((question) => ({
+      id: randomUUID(),
+      lead_id: lead.id,
+      sort_order: 0,
+      taxonomy_pillar: question.taxonomyPillar || 'Technical Pain Points',
+      domain_context: question.domainContext || '',
+      category: question.category || 'Technology Stack',
+      text: question.text,
+      type: question.type || 'singlechoice',
+      options: question.options ?? [],
+      suggested_options: [] as string[],
+      is_mandatory: false,
+    }));
+    const bodyRows = interleaveMandatory(generatedRows, mandatoryRowsForLead)
+      .slice(0, MAX_QUESTIONS)
+      .map((row, index) => ({ ...row, sort_order: index + 1 }));
 
     const rows = [introRow, ...bodyRows];
 

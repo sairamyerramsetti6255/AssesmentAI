@@ -105,6 +105,9 @@ export type ConsultingAssessment = {
   contactName: string
   email: string
   phone: string
+  stage: string
+  assessmentStatus: string
+  fromConsulting: boolean
   story: string
   progress: number
   submittedAt: string | null
@@ -123,6 +126,18 @@ export type ConsultingAssessment = {
     sortOrder: number
     answer: string
   }[]
+  proposal: {
+    summary: string
+    nextSteps: string[]
+    useCases: UseCase[]
+    architecture: {
+      hosting: string
+      pipelines: string
+      access: string
+      security: string
+    } | null
+    document: Record<string, unknown> | null
+  } | null
 }
 
 export function getConsultingAssessments(): Promise<ConsultingAssessment[]> {

@@ -154,7 +154,19 @@ INSERT INTO mandatory_questions (text, type, options, sort_order) VALUES
   ('Which best describes your current data infrastructure maturity?',
    'singlechoice',
    ARRAY['Fragmented / siloed', 'Centralised but limited', 'Integrated data platform', 'Real-time data mesh', 'AI-native'],
-   1)
+   1),
+  ('What are the biggest challenges or gaps in your business today?',
+   'multichoice',
+   ARRAY['Too much repetitive or manual work', 'Slow customer service or follow-ups', 'Errors, delays, or inefficient workflows', 'Difficulty managing or understanding business data', 'High operational costs or low team productivity', 'Other'],
+   2),
+  ('Where would you like to use AI or automation?',
+   'multichoice',
+   ARRAY['Customer support / Chatbot / Voice AI', 'Sales and marketing automation', 'Document processing / OCR / Data extraction', 'Workflow and internal process automation', 'Analytics, forecasting, and business insights', 'Not sure — recommend the best opportunities for us'],
+   3),
+  ('What type of solution are you looking for?',
+   'singlechoice',
+   ARRAY['Automate an existing manual process', 'Add AI features to our existing software', 'Build a new AI-powered application', 'Improve customer experience and response time', 'Reduce costs and improve productivity', 'We need an AI assessment and solution recommendation'],
+   4)
 ON CONFLICT DO NOTHING;
 
 -- ============================================================

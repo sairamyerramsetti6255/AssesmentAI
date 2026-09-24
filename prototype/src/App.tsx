@@ -33,6 +33,7 @@ export default function App() {
               <Route path="research" element={<LeadResearch />} />
               <Route path="assessment" element={<AssessmentWorkspace />} />
               <Route path="assessments" element={<ConsultingAssessments />} />
+              <Route path="assessments/:id" element={<ConsultingAssessments />} />
               <Route path="review" element={<Navigate to="/assessment" replace />} />
               <Route path="client-response" element={<ClientResponse />} />
               <Route path="delivery" element={<Navigate to="/client-response" replace />} />

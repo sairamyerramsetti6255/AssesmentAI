@@ -1,112 +1,157 @@
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
+import { getConsultingAssessments, type ConsultingAssessment } from '../lib/api'
+import {
+  answeredCount,
+  assessmentStatus,
+  dayCounts,
+  hasProposal,
+  industryCounts,
+  statusLabel,
+} from '../lib/assessmentStats'
+import { BarChart, ColumnChart, DonutChart } from '../components/charts'
 import { Badge, Card, PageHeader, StatCard } from '../components/ui'
 
 export function Analytics() {
-  const { leads, platformUsers } = useApp()
-  const allRemarks = leads.flatMap((l) =>
-    l.remarks.map((r) => ({ company: l.companyName, executive: l.assignedExecutive, text: r })),
-  )
+  const { leads } = useApp()
+  const [rows, setRows] = useState<ConsultingAssessment[]>([])
+  const [error, setError] = useState('')
 
-  const executives = platformUsers.filter((u) =>
-    ['account_executive', 'team_lead', 'super_admin'].includes(u.role),
-  )
+  useEffect(() => {
+    let cancelled = false
+    getConsultingAssessments()
+      .then((data) => {
+        if (!cancelled) setRows(data)
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Could not load analytics')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const submitted = rows.filter((row) => assessmentStatus(row) === 'submitted').length
+  const inProgress = rows.filter((row) => assessmentStatus(row) === 'progress').length
+  const started = rows.filter((row) => assessmentStatus(row) === 'started').length
+  const proposals = rows.filter(hasProposal).length
+  const answers = rows.reduce((sum, row) => sum + answeredCount(row), 0)
+  const questions = rows.reduce((sum, row) => sum + row.questions.length, 0)
+
+  const completion = [...rows]
+    .sort((a, b) => b.progress - a.progress)
+    .map((row) => ({
+      label: row.companyName,
+      value: row.progress,
+      color: row.progress >= 100 ? '#047857' : row.progress > 0 ? '#b45309' : '#0066b3',
+      to: `/assessments/${row.id}`,
+    }))
+
+  const industries = industryCounts(rows).map((item) => ({
+    label: item.label,
+    value: item.value,
+    color: '#0066b3',
+    to: '/assessments',
+  }))
+
+  const days = dayCounts(rows).map((item) => ({
+    label: item.label,
+    value: item.value,
+    color: '#1a7fd4',
+    to: '/assessments',
+  }))
 
   return (
-    <div>
+    <div className="space-y-6">
       <PageHeader
         title="Analytics"
-        description="Global leads ledger, executive remarks audit, and performance visualizations."
+        description="Completion, industry mix, and answer volume for consulting assessments. Click a bar or a row to open that lead."
       />
-      <div className="mb-6 grid gap-4 sm:grid-cols-3">
-        <StatCard label="System-wide leads" value={leads.length} />
-        <StatCard
-          label="Approved assessments"
-          value={leads.filter((l) => l.assessmentStatus === 'approved').length}
-        />
-        <StatCard
-          label="Converted"
-          value={leads.filter((l) => l.funnelStatus === 'converted').length}
-        />
+
+      {error && (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</div>
+      )}
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Assessments" value={rows.length} sub={`${leads.length} workspace leads`} />
+        <StatCard label="Answers captured" value={answers} sub={`${questions} questions asked`} />
+        <StatCard label="Submitted" value={submitted} sub={`${inProgress} in progress · ${started} started`} />
+        <StatCard label="Proposals on file" value={proposals} sub="Generated from discovery" />
       </div>
-      <Card title="Comprehensive global leads report" className="mb-6">
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card title="Status mix">
+          <DonutChart
+            slices={[
+              { label: 'Submitted', value: submitted, color: '#047857', to: '/assessments' },
+              { label: 'In progress', value: inProgress, color: '#b45309', to: '/assessments' },
+              { label: 'Started', value: started, color: '#0066b3', to: '/assessments' },
+            ]}
+          />
+        </Card>
+        <Card title="Assessments by day">
+          <ColumnChart slices={days} />
+        </Card>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card title="Completion by company">
+          <BarChart slices={completion} />
+        </Card>
+        <Card title="Industry">
+          <BarChart slices={industries} />
+        </Card>
+      </div>
+
+      <Card title="Assessment data">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead>
-              <tr className="border-b text-xs uppercase text-slate-500">
-                <th className="pb-2 pr-3">Lead</th>
-                <th className="pb-2 pr-3">Industry</th>
-                <th className="pb-2 pr-3">Country</th>
-                <th className="pb-2 pr-3">Executive</th>
-                <th className="pb-2 pr-3">Funnel</th>
-                <th className="pb-2 pr-3">Created</th>
-                <th className="pb-2">Last interaction</th>
+              <tr className="border-b text-xs uppercase text-stone-500">
+                <th className="pb-2 pr-3 font-medium">Company</th>
+                <th className="pb-2 pr-3 font-medium">Industry</th>
+                <th className="pb-2 pr-3 font-medium">Status</th>
+                <th className="pb-2 pr-3 font-medium">Answers</th>
+                <th className="pb-2 pr-3 font-medium">Progress</th>
+                <th className="pb-2 font-medium">Proposal</th>
               </tr>
             </thead>
             <tbody>
-              {leads.map((l) => (
-                <tr key={l.id} className="border-b border-slate-50">
-                  <td className="py-2 pr-3 font-medium">{l.companyName}</td>
-                  <td className="py-2 pr-3">{l.industry}</td>
-                  <td className="py-2 pr-3">{l.country}</td>
-                  <td className="py-2 pr-3">{l.assignedExecutive}</td>
-                  <td className="py-2 pr-3">
-                    <Badge tone="brand">{l.funnelStatus}</Badge>
+              {rows.map((row) => {
+                const status = assessmentStatus(row)
+                return (
+                  <tr key={row.id} className="border-b border-stone-100">
+                    <td className="py-2.5 pr-3">
+                      <Link to={`/assessments/${row.id}`} className="font-medium text-pbs-800 hover:underline">
+                        {row.companyName}
+                      </Link>
+                    </td>
+                    <td className="py-2.5 pr-3 text-stone-600">{row.industry || '—'}</td>
+                    <td className="py-2.5 pr-3">
+                      <Badge tone={status === 'submitted' ? 'emerald' : status === 'progress' ? 'amber' : 'brand'}>
+                        {statusLabel(status)}
+                      </Badge>
+                    </td>
+                    <td className="py-2.5 pr-3 text-stone-600">
+                      {answeredCount(row)} / {row.questions.length}
+                    </td>
+                    <td className="py-2.5 pr-3 text-stone-600">{row.progress}%</td>
+                    <td className="py-2.5 text-stone-600">{hasProposal(row) ? 'Ready' : '—'}</td>
+                  </tr>
+                )
+              })}
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-4 text-stone-500">
+                    No consulting assessments to chart yet.
                   </td>
-                  <td className="py-2 pr-3 text-slate-500">{l.createdAt}</td>
-                  <td className="py-2 text-slate-500">{l.lastInteraction}</td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>
       </Card>
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card title="Executive remarks ledger">
-          {allRemarks.length === 0 ? (
-            <p className="text-sm text-slate-500">No remarks recorded.</p>
-          ) : (
-            <ul className="max-h-64 space-y-3 overflow-y-auto text-sm">
-              {allRemarks.map((r, i) => (
-                <li key={i} className="rounded-lg bg-slate-50 p-3">
-                  <p className="text-xs font-medium text-slate-500">
-                    {r.company} · {r.executive}
-                  </p>
-                  <p className="mt-1 text-slate-700">{r.text}</p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-        <Card title="Executive-wise performance">
-          <div className="space-y-4">
-            {executives.map((ex) => {
-              const exLeads = leads.filter((l) => l.assignedExecutive === ex.name)
-              const approved = exLeads.filter((l) => l.assessmentStatus === 'approved').length
-              const converted = exLeads.filter((l) => l.funnelStatus === 'converted').length
-              const conversionRate = exLeads.length ? converted / exLeads.length : 0
-              return (
-                <div key={ex.id}>
-                  <div className="mb-1 flex justify-between text-sm">
-                    <span className="font-medium">{ex.name}</span>
-                    <span className="text-slate-500">
-                      {exLeads.length} leads · {Math.round(conversionRate * 100)}% conv.
-                    </span>
-                  </div>
-                  <div className="h-2 rounded-full bg-slate-100">
-                    <div
-                      className="h-2 rounded-full bg-pbs-500"
-                      style={{ width: `${(approved / Math.max(exLeads.length, 1)) * 100}%` }}
-                    />
-                  </div>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {approved} approved assessments
-                  </p>
-                </div>
-              )
-            })}
-          </div>
-        </Card>
-      </div>
     </div>
   )
 }

@@ -142,7 +142,7 @@ export function AdminMasterDataPanel({
 
       {tab === 'questions' && (
         <p className="mb-3 text-xs text-slate-500">
-          These questions are always included at the start of every assessment. Edit text and
+          These questions are included in every assessment, placed between the AI-generated questions. Edit text and
           options below — changes apply immediately to Assessment Workspace and the client portal.
         </p>
       )}

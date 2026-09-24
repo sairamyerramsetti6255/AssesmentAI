@@ -246,16 +246,14 @@ router.get('/consulting-assessments', async (_req: Request, res: Response) => {
     const { rows } = await pool.query<Record<string, unknown>>(
       `SELECT l.id, l.company_name, l.industry, l.domain, l.client_email, l.client_phone,
               l.intake_remarks, l.client_progress, l.client_assessment_submitted_at, l.created_at,
+              l.funnel_status, l.assessment_status, l.assigned_executive,
               l.client_answers, l.client_richtext, l.client_other_text, l.ai_research,
+              l.proposal_summary, l.proposal_next_steps, l.proposal_use_cases,
+              l.proposal_architecture, l.proposal_document,
               q.id AS question_id, q.text AS question_text, q.type AS question_type,
               q.options AS question_options, q.sort_order
          FROM leads l
          LEFT JOIN prototype_questions q ON q.lead_id = l.id
-        WHERE l.intake_remarks ILIKE 'Contact:%'
-          AND l.company_name !~* 'gr[ae]y[[:space:]]*logic'
-          AND COALESCE(l.client_email, '') !~* '(graylogic|grey[[:space:]]*logic|test@example\\.com|sairamyerramsetti)'
-          AND l.company_name !~* '^(aurora health|nova health|acme financial|pacific retail|pilot logistics|nordic logistics|helix manufacturing|summit financial)'
-          AND l.company_name !~* '^(na|n/?a|test)([[:space:]]|$)'
         ORDER BY l.created_at DESC, q.sort_order ASC NULLS LAST`,
     );
 
@@ -265,8 +263,10 @@ router.get('/consulting-assessments', async (_req: Request, res: Response) => {
       let item = byId.get(id);
       if (!item) {
         const remarks = String(row.intake_remarks ?? '');
-        const contact = remarks.match(/^Contact:\s*(.+)$/m)?.[1]?.trim() ?? '';
-        const story = remarks.split(/\n\n/).slice(1).join('\n\n').trim();
+        const fromConsulting = /^Contact:/i.test(remarks.trim());
+        const contact = remarks.match(/^Contact:\s*(.+)$/m)?.[1]?.trim()
+          || String(row.assigned_executive ?? '');
+        const story = fromConsulting ? remarks.split(/\n\n/).slice(1).join('\n\n').trim() : remarks.trim();
         const research = row.ai_research && typeof row.ai_research === 'object'
           ? (row.ai_research as Record<string, unknown>)
           : null;
@@ -278,6 +278,9 @@ router.get('/consulting-assessments', async (_req: Request, res: Response) => {
           contactName: contact,
           email: String(row.client_email ?? ''),
           phone: String(row.client_phone ?? ''),
+          stage: String(row.funnel_status ?? ''),
+          assessmentStatus: String(row.assessment_status ?? ''),
+          fromConsulting,
           story,
           progress: Number(row.client_progress ?? 0),
           submittedAt: row.client_assessment_submitted_at ?? null,
@@ -294,6 +297,7 @@ router.get('/consulting-assessments', async (_req: Request, res: Response) => {
               }
             : null,
           questions: [],
+          proposal: proposalFromRow(row),
         };
         byId.set(id, item);
       }
@@ -303,10 +307,12 @@ router.get('/consulting-assessments', async (_req: Request, res: Response) => {
       const other = (row.client_other_text ?? {}) as Record<string, unknown>;
       const qid = String(row.question_id);
       const raw = answers[qid];
-      const extra = [richtext[qid], other[qid]].filter((v) => v != null && String(v).trim()).map(String);
       let answer = '';
       if (Array.isArray(raw)) answer = raw.map(String).join(', ');
       else if (raw != null && String(raw).trim()) answer = String(raw);
+      const extra = [richtext[qid], other[qid]]
+        .filter((v) => v != null && String(v).trim() && String(v).trim() !== answer.trim())
+        .map(String);
       if (extra.length) answer = answer ? `${answer}\n${extra.join('\n')}` : extra.join('\n');
       (item.questions as Record<string, unknown>[]).push({
         id: qid,
@@ -1035,6 +1041,37 @@ async function getLead(id: string) {
 async function getLeadByPortalToken(token: string) {
   const { data } = await sb().from('leads').select('*').eq('portal_token', token).single();
   return data;
+}
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function proposalFromRow(row: Record<string, unknown>) {
+  const summary = String(row.proposal_summary ?? '').trim();
+  const nextSteps = Array.isArray(row.proposal_next_steps) ? row.proposal_next_steps.map(String) : [];
+  const useCases = Array.isArray(row.proposal_use_cases) ? row.proposal_use_cases : [];
+  const architecture = asObject(row.proposal_architecture);
+  const document = asObject(row.proposal_document);
+  const archText = architecture
+    ? ['hosting', 'pipelines', 'access', 'security'].map((key) => String(architecture[key] ?? '')).join('').trim()
+    : '';
+  if (!summary && !nextSteps.length && !useCases.length && !archText && !document) return null;
+  return {
+    summary,
+    nextSteps,
+    useCases,
+    architecture: architecture
+      ? {
+          hosting: String(architecture.hosting ?? ''),
+          pipelines: String(architecture.pipelines ?? ''),
+          access: String(architecture.access ?? ''),
+          security: String(architecture.security ?? ''),
+        }
+      : null,
+    document,
+  };
 }
 
 function findDocumentRecord(lead: Record<string, unknown>, docId: string): DocumentRecord | null {

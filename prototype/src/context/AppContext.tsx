@@ -426,8 +426,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const idx = sorted.findIndex((q) => q.id === id)
       const q = sorted[idx]
       if (idx <= 0 || !q || q.isMandatory) return sorted
-      const mandatoryCount = mandatoryQuestions.length
-      if (idx <= mandatoryCount) return sorted
       const next = [...sorted]
       ;[next[idx - 1], next[idx]] = [next[idx], next[idx - 1]]
       const synced = syncAssessmentWithMandatory(normalizeSortOrder(next), mandatoryQuestions)
