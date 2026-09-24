@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { SiteFooter, SiteHeader } from '../components/SiteHeader.tsx'
 import { VoiceButton } from '../components/VoiceButton.tsx'
 import { WebsiteResearchLoader, type ResearchStatusView } from '../components/WebsiteResearchLoader.tsx'
 import {
+  cleanVoiceTranscript,
   enroll,
   fetchResearchStatus,
   generateQuestions,
@@ -85,6 +86,7 @@ export function Assess() {
   const [otherText, setOtherText] = useState<Record<string, string>>({})
   const [emailNote, setEmailNote] = useState('')
   const current = questions[step]
+  const spokenRef = useRef<Record<string, string>>({})
   const progress = useMemo(() => {
     if (!questions.length) return 0
     return Math.round(((step + 1) / questions.length) * 100)
@@ -212,10 +214,9 @@ export function Assess() {
       }
     }
     if (type === 'text') {
-      setAnswers((prev) => ({
-        ...prev,
-        [current.id]: appendText(String(prev[current.id] ?? ''), spoken),
-      }))
+      const next = appendText(spokenRef.current[current.id] ?? String(answers[current.id] ?? ''), spoken)
+      spokenRef.current[current.id] = next
+      setAnswers((prev) => ({ ...prev, [current.id]: next }))
       return
     }
     setOtherText((prev) => ({ ...prev, [current.id]: appendText(prev[current.id] ?? '', spoken) }))
@@ -399,6 +400,7 @@ export function Assess() {
                   note={otherText[current.id] ?? ''}
                   onChange={(value) => {
                     setInterim('')
+                    if (typeof value === 'string') spokenRef.current[current.id] = value
                     setAnswers((prev) => ({ ...prev, [current.id]: value }))
                   }}
                   onNote={(value) => setOtherText((prev) => ({ ...prev, [current.id]: value }))}
@@ -413,6 +415,23 @@ export function Assess() {
                   onFinal={(text) => {
                     setInterim('')
                     applyVoice(text)
+                  }}
+                  onStopped={() => {
+                    if (!current || normalizeType(current.type) !== 'text') return
+                    const questionId = current.id
+                    const raw = (spokenRef.current[questionId] || '').trim()
+                    if (raw.length < 8) return
+                    setBusy(true)
+                    void cleanVoiceTranscript(raw)
+                      .then((result) => {
+                        const text = result.text.trim()
+                        if (!text) return
+                        spokenRef.current[questionId] = text
+                        setAnswers((prev) => ({ ...prev, [questionId]: text }))
+                        setInterim('')
+                      })
+                      .catch(() => {})
+                      .finally(() => setBusy(false))
                   }}
                 />
                 <p className="mt-2 text-sm text-pbs-600">

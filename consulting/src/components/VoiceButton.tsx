@@ -4,6 +4,7 @@ import { liveVoiceSupported, microphoneSupported, startLiveVoice, startRecording
 interface Props {
   onFinal: (text: string) => void
   onInterim?: (text: string) => void
+  onStopped?: () => void
   autoStart?: boolean
   listenKey?: string
   maxListenMs?: number
@@ -13,6 +14,7 @@ interface Props {
 export function VoiceButton({
   onFinal,
   onInterim,
+  onStopped,
   autoStart = false,
   listenKey,
   maxListenMs,
@@ -48,24 +50,22 @@ export function VoiceButton({
     setLevel(0)
     const session = recordingRef.current
     recordingRef.current = null
-    if (!session) {
-      busyRef.current = false
-      return
-    }
     setProcessing(true)
-    setHint('Checking the recording…')
+    setHint('Summarising what you said…')
     try {
-      const blob = await session.stop()
-      if (blob && blob.size >= 400) {
-        const text = (await transcribeBlobWithSarvam(blob)).trim()
-        if (text) onFinal(text)
+      if (session) {
+        const blob = await session.stop()
+        if (blob && blob.size >= 400) {
+          const text = (await transcribeBlobWithSarvam(blob)).trim()
+          if (text) onFinal(text)
+        }
       }
-      setHint('')
     } catch {
-      setHint('')
+      /* keep the live transcript */
     } finally {
       setProcessing(false)
       busyRef.current = false
+      onStopped?.()
     }
   }
 

@@ -21,6 +21,7 @@ import {
 } from '../lib/openrouter/aiRun.js';
 import { notifyAssessmentReceived } from '../lib/zeptomail.js';
 import { checkSarvamHealth, transcribeWithSarvam } from '../lib/sarvam.js';
+import { geminiGenerateText } from '../lib/gemini.js';
 import { mergeCrawlStatus, parseCrawlStatus, researchMessage } from '../lib/researchStatus.js';
 import { buildClientIntroSummary } from '../lib/researchSummary.js';
 import { scrapeWebsite } from '../lib/openrouter/scrape.js';
@@ -593,6 +594,35 @@ router.get('/sarvam/health', async (_req: Request, res: Response) => {
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Sarvam health check failed';
     res.status(500).json({ error: message });
+  }
+});
+
+router.post('/voice/clean', async (req: Request, res: Response) => {
+  try {
+    const transcript = clean(req.body.transcript);
+    if (transcript.length < 8) {
+      return res.status(400).json({ error: 'Not enough speech to summarise.' });
+    }
+    const summary = await geminiGenerateText(
+      `You clean a spoken client answer for an IT assessment form.
+
+Rules:
+- Keep only what they actually said about the company, the person, the work, and the problems they want solved.
+- Remove greetings, repeated words, filler (hello, okay, um), and false starts.
+- Write 2 to 5 clear sentences in first person.
+- Do not add facts they did not say.
+- Return plain text only.
+
+Transcript:
+${transcript.slice(0, 6000)}`,
+      { temperature: 0.2, maxOutputTokens: 800 },
+    );
+    const text = summary.replace(/^["']|["']$/g, '').trim();
+    res.json({ text: text || transcript });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Could not summarise the voice';
+    console.error('[public/voice/clean]', e);
+    res.status(502).json({ error: message });
   }
 });
 

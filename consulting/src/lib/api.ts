@@ -41,6 +41,13 @@ export function enroll(input: EnrollInput) {
   })
 }
 
+export function cleanVoiceTranscript(transcript: string) {
+  return request<{ text: string }>('/api/public/voice/clean', {
+    method: 'POST',
+    body: JSON.stringify({ transcript }),
+  })
+}
+
 export function fetchSarvamHealth() {
   return request<{
     configured: boolean
