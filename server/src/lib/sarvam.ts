@@ -163,13 +163,15 @@ export async function transcribeWithSarvam(
   const config = getSarvamConfigFromEnv();
   if (!config) throw new Error('Sarvam is not configured on the server.');
 
-  const ext = mimeType.includes('webm') ? 'webm' : mimeType.includes('mp4') ? 'm4a' : 'wav';
+  const cleanType = (mimeType || 'audio/webm').split(';')[0].trim();
+  const ext = cleanType.includes('mp4') || cleanType.includes('m4a') ? 'm4a' : cleanType.includes('wav') ? 'wav' : 'webm';
+  const language = !languageCode || languageCode === 'auto' ? 'unknown' : languageCode;
   let lastError = 'Speech-to-Text failed';
 
   for (const apiKey of config.apiKeys) {
     const form = new FormData();
-    form.append('file', new Blob([audio], { type: mimeType || 'audio/webm' }), `audio.${ext}`);
-    form.append('language_code', languageCode === 'auto' ? 'unknown' : languageCode);
+    form.append('file', new Blob([audio], { type: cleanType }), `audio.${ext}`);
+    form.append('language_code', language);
     form.append('model', 'saaras:v3');
     form.append('mode', 'transcribe');
 
