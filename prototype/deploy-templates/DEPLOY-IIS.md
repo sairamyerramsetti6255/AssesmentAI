@@ -30,7 +30,7 @@ Copy the **entire** `deploy-iis` folder to the server (zip/USB). Do **not** copy
 
    ```
    OPENROUTER_API_KEY=your-real-key-here
-   OPENROUTER_MODEL=nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+   OPENROUTER_MODEL=meta-llama/llama-3.3-70b-instruct:free
    OPENROUTER_SITE_URL=https://your-domain.com
    OPENROUTER_APP_NAME=AI Readiness Assessment
    ```

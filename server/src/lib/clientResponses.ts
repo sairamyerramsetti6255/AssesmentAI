@@ -1,7 +1,7 @@
-import { requireSupabase } from './supabase.js';
+import { requireDb } from './db.js';
 
 function sb() {
-  return requireSupabase();
+  return requireDb();
 }
 
 function formatAnswerDisplay(
@@ -58,13 +58,14 @@ export async function syncClientResponseRows(input: SyncInput): Promise<void> {
     /* optional columns — migration 007 may not be applied */
   }
 
-  const { data: questions } = await sb()
+  const { data } = await sb()
     .from('prototype_questions')
     .select('id, text, taxonomy_pillar, type, sort_order')
     .eq('lead_id', leadId)
     .order('sort_order');
 
-  if (!questions?.length) return;
+  const questions: Record<string, unknown>[] = data ?? [];
+  if (!questions.length) return;
 
   const answerMap = answers ?? {};
   const richtextMap = richtext ?? {};

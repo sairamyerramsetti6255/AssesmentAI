@@ -58,13 +58,13 @@ export function IndustryVerticalField({
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         placeholder="Search industries…"
-        className="mb-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+        className="mb-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-pbs-500 focus:outline-none focus:ring-2 focus:ring-pbs-500/20"
         autoComplete="off"
       />
 
       {selected && (
         <p className="mb-2 text-xs text-slate-600">
-          Selected: <span className="font-medium text-indigo-700">{selected.label}</span>
+          Selected: <span className="font-medium text-pbs-700">{selected.label}</span>
         </p>
       )}
 
@@ -89,7 +89,7 @@ export function IndustryVerticalField({
                 tabIndex={0}
                 className={`cursor-pointer rounded-md px-3 py-2.5 outline-none transition ${
                   isSelected
-                    ? 'bg-indigo-50 ring-1 ring-indigo-600/30'
+                    ? 'bg-pbs-50 ring-1 ring-pbs-600/30'
                     : 'hover:bg-slate-50 focus:bg-slate-50'
                 }`}
                 onClick={() => onChange(opt.value)}

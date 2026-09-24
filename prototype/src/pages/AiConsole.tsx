@@ -101,7 +101,7 @@ export function AiConsole() {
           </Button>
           <div className="mt-4 space-y-3">
             <div>
-              <Badge tone="indigo">Turn 1</Badge>
+              <Badge tone="brand">Turn 1</Badge>
               <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{turn1 || '—'}</p>
             </div>
             <div>

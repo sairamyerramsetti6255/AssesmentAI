@@ -145,7 +145,7 @@ export function AdminUserPanel({ users, currentUserId, onRegister, onUpdate, onD
                     <p className="font-medium text-slate-800">
                       {u.name}
                       {isSelf && (
-                        <span className="ml-2 text-xs font-normal text-indigo-600">(you)</span>
+                        <span className="ml-2 text-xs font-normal text-pbs-600">(you)</span>
                       )}
                     </p>
                     <p className="text-slate-600">{u.email}</p>
@@ -155,7 +155,7 @@ export function AdminUserPanel({ users, currentUserId, onRegister, onUpdate, onD
                     <button
                       type="button"
                       title="Edit user"
-                      className="rounded p-1.5 text-slate-500 hover:bg-indigo-50 hover:text-indigo-700"
+                      className="rounded p-1.5 text-slate-500 hover:bg-pbs-50 hover:text-pbs-700"
                       onClick={() => startEdit(u)}
                     >
                       <PencilIcon />

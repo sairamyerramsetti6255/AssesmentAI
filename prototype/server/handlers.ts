@@ -38,7 +38,7 @@ export async function handleChatCompletion(
   config: OpenRouterConfig,
   body: ChatRequestBody,
 ): Promise<ChatCompletionResponse> {
-  const model = body.model ?? config.model // defaults to nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+  const model = body.model ?? config.model // defaults to meta-llama/llama-3.3-70b-instruct:free
   const messages = body.messages ?? []
 
   const apiResponse = (await client.chat.completions.create({
@@ -63,7 +63,7 @@ export async function handleChatStream(
   body: ChatRequestBody,
   res: ServerResponse,
 ) {
-  const model = body.model ?? config.model // defaults to nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+  const model = body.model ?? config.model // defaults to meta-llama/llama-3.3-70b-instruct:free
   const messages = body.messages ?? []
 
   const stream = await client.chat.completions.create({

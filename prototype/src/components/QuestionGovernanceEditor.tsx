@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { TAXONOMY_PILLARS } from '../../shared/assessment-schema'
 import type { AssessmentQuestion, AssessmentTaxonomy } from '../types'
-import { inputTypeLabel, normalizeInputType } from '../lib/question-types'
+import { ensureChoiceOptions, inputTypeLabel, normalizeInputType } from '../lib/question-types'
 import { sortQuestions } from '../lib/questions'
 import { AnswerOptionsEditor } from './AnswerOptionsEditor'
 import { Badge, Button, Input, Select } from './ui'
@@ -10,6 +10,8 @@ interface Props {
   questions: AssessmentQuestion[]
   taxonomy?: AssessmentTaxonomy
   rewritingId?: string | null
+  saveStatus?: 'idle' | 'saving' | 'saved' | 'error'
+  saveError?: string | null
   onRewrite?: (id: string) => void | Promise<void>
   onUpdate: (id: string, patch: Partial<AssessmentQuestion>) => void
   onDelete: (id: string) => void
@@ -17,6 +19,13 @@ interface Props {
   onMoveDown: (id: string) => void
   onAdd: () => void
 }
+
+const RESPONSE_TYPES: { value: AssessmentQuestion['type']; label: string }[] = [
+  { value: 'singlechoice', label: 'Single choice' },
+  { value: 'multichoice', label: 'Multiple choice' },
+  { value: 'scale', label: 'Scale / rating' },
+  { value: 'text', label: 'Free text' },
+]
 
 function RewriteIcon({ className }: { className?: string }) {
   return (
@@ -41,6 +50,8 @@ export function QuestionGovernanceEditor({
   questions,
   taxonomy,
   rewritingId,
+  saveStatus = 'idle',
+  saveError,
   onRewrite,
   onUpdate,
   onDelete,
@@ -83,15 +94,15 @@ export function QuestionGovernanceEditor({
   return (
     <div className="space-y-4">
       {taxonomy && (
-        <details className="shrink-0 rounded-xl border border-indigo-100 bg-indigo-50/40 p-4">
-          <summary className="cursor-pointer text-sm font-semibold text-indigo-900">
+        <details className="shrink-0 rounded-xl border border-pbs-100 bg-pbs-50/40 p-4">
+          <summary className="cursor-pointer text-sm font-semibold text-pbs-900">
             Domain taxonomy — {taxonomy.userDomain}
           </summary>
           <div className="mt-3 grid gap-3 text-xs text-slate-700 sm:grid-cols-3">
             <div>
               <p className="font-semibold">Technical</p>
               <ul className="mt-1 list-inside list-disc">
-                {taxonomy.technicalPainPoints.slice(0, 4).map((t) => (
+                {(taxonomy.technicalPainPoints ?? []).slice(0, 4).map((t) => (
                   <li key={t}>{t}</li>
                 ))}
               </ul>
@@ -99,7 +110,7 @@ export function QuestionGovernanceEditor({
             <div>
               <p className="font-semibold">Operational</p>
               <ul className="mt-1 list-inside list-disc">
-                {taxonomy.operationalPainAreas.slice(0, 4).map((t) => (
+                {(taxonomy.operationalPainAreas ?? []).slice(0, 4).map((t) => (
                   <li key={t}>{t}</li>
                 ))}
               </ul>
@@ -107,7 +118,7 @@ export function QuestionGovernanceEditor({
             <div>
               <p className="font-semibold">Process</p>
               <ul className="mt-1 list-inside list-disc">
-                {taxonomy.processImprovements.slice(0, 4).map((t) => (
+                {(taxonomy.processImprovements ?? []).slice(0, 4).map((t) => (
                   <li key={t}>{t}</li>
                 ))}
               </ul>
@@ -127,7 +138,7 @@ export function QuestionGovernanceEditor({
 
       <div className="h-2 overflow-hidden rounded-full bg-slate-200">
         <div
-          className="h-full bg-indigo-600 transition-all duration-300"
+          className="h-full bg-pbs-600 transition-all duration-300"
           style={{ width: `${((index + 1) / ordered.length) * 100}%` }}
         />
       </div>
@@ -137,7 +148,7 @@ export function QuestionGovernanceEditor({
           <div className="mb-3 flex min-h-[1.75rem] flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap gap-2">
               {q.isMandatory && <Badge tone="amber">Mandatory</Badge>}
-              <Badge tone="indigo">{q.taxonomyPillar}</Badge>
+              <Badge tone="brand">{q.taxonomyPillar}</Badge>
               <Badge tone="emerald">AI type: {inputTypeLabel(q.type)}</Badge>
               {q.domainContext && <Badge tone="slate">{q.domainContext}</Badge>}
             </div>
@@ -147,7 +158,7 @@ export function QuestionGovernanceEditor({
                 title="Rewrite question and options with AI"
                 disabled={isRewriting || !!rewritingId}
                 onClick={() => onRewrite(q.id)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs font-medium text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-pbs-200 bg-pbs-50 px-2.5 py-1.5 text-xs font-medium text-pbs-700 transition hover:bg-pbs-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <RewriteIcon className="h-3.5 w-3.5 shrink-0" />
                 {isRewriting ? 'Rewriting…' : 'Rewrite question & options'}
@@ -166,9 +177,20 @@ export function QuestionGovernanceEditor({
         <div className="min-h-[22rem] flex-1 overflow-y-auto px-6 py-4">
           {hasChoices ? (
             <div className="mb-4 rounded-lg bg-slate-50 p-4">
-              <p className="mb-3 text-xs font-semibold uppercase text-slate-500">
-                {q.isMandatory ? 'Mandatory answer options' : 'Client answer options'}
-              </p>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-semibold uppercase text-slate-500">
+                  {q.isMandatory ? 'Mandatory answer options' : 'Client answer options'}
+                </p>
+                {saveStatus === 'saving' && (
+                  <span className="text-xs text-slate-500">Saving…</span>
+                )}
+                {saveStatus === 'saved' && (
+                  <span className="text-xs font-medium text-emerald-600">Saved</span>
+                )}
+                {saveStatus === 'error' && saveError && (
+                  <span className="text-xs font-medium text-rose-600">{saveError}</span>
+                )}
+              </div>
               <AnswerOptionsEditor
                 questionId={q.id}
                 options={q.options ?? []}
@@ -197,7 +219,7 @@ export function QuestionGovernanceEditor({
 
           <button
             type="button"
-            className="mt-3 text-xs text-indigo-600 hover:underline"
+            className="mt-3 text-xs text-pbs-600 hover:underline"
             onClick={() => setShowAdvanced((v) => !v)}
           >
             {showAdvanced ? 'Hide advanced settings' : 'Advanced settings'}
@@ -205,6 +227,22 @@ export function QuestionGovernanceEditor({
 
           {showAdvanced && (
             <div className="mt-3 space-y-3 border-t border-slate-100 pt-3">
+              <Select
+                label="Response type"
+                value={inputType}
+                onChange={(e) => {
+                  const nextType = e.target.value as AssessmentQuestion['type']
+                  const patch: Partial<AssessmentQuestion> = { type: nextType }
+                  if (nextType === 'singlechoice' || nextType === 'multichoice') {
+                    const opts = q.options ?? []
+                    if (opts.length === 0) {
+                      patch.options = ensureChoiceOptions(['Option A', 'Option B'])
+                    }
+                  }
+                  onUpdate(q.id, patch)
+                }}
+                options={RESPONSE_TYPES.map((t) => ({ value: t.value, label: t.label }))}
+              />
               <Select
                 label="Taxonomy pillar"
                 value={q.taxonomyPillar}
@@ -251,10 +289,10 @@ export function QuestionGovernanceEditor({
         {!q.isMandatory ? (
           <span className="text-xs text-slate-500">
             Reorder:{' '}
-            <button type="button" className="text-indigo-600" onClick={() => onMoveUp(q.id)}>
+            <button type="button" className="text-pbs-600" onClick={() => onMoveUp(q.id)}>
               ↑
             </button>{' '}
-            <button type="button" className="text-indigo-600" onClick={() => onMoveDown(q.id)}>
+            <button type="button" className="text-pbs-600" onClick={() => onMoveDown(q.id)}>
               ↓
             </button>
           </span>

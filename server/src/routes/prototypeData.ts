@@ -1,5 +1,5 @@
 /**
- * Prototype data routes — Supabase-backed CRUD for:
+ * Prototype data routes — Neon-backed CRUD for:
  *   leads, platform_users, prototype_questions,
  *   mandatory_questions, master_data, activity_log
  *
@@ -9,7 +9,7 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
-import { requireSupabase } from '../lib/supabase.js';
+import { requireDb } from '../lib/db.js';
 import { demoDocumentContent, readLeadDocumentFile, saveLeadDocumentFile } from '../lib/documentStore.js';
 import { getClientResponseRows, syncClientResponseRows } from '../lib/clientResponses.js';
 
@@ -29,7 +29,7 @@ interface DocumentRecord {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-function sb() { return requireSupabase(); }
+function sb() { return requireDb(); }
 
 const OPTIONAL_LEAD_COLUMNS = [
   'document_records',
@@ -110,7 +110,7 @@ async function updateLeadRow(id: string, patch: Record<string, unknown>) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// AUTH (simple password check against platform_users — no Supabase auth)
+// AUTH (simple password check against platform_users)
 // ═══════════════════════════════════════════════════════════════════════════
 
 router.post('/auth/login', async (req: Request, res: Response) => {
@@ -126,12 +126,12 @@ router.post('/auth/login', async (req: Request, res: Response) => {
       .single();
 
     if (error) {
-      console.error('[auth/login] Supabase error:', error.message);
       if (error.code === 'PGRST116') {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
+      console.error('[auth/login] database error:', error.message);
       return res.status(503).json({
-        error: 'Database unavailable. Run Supabase migrations (003_prototype_schema.sql) and check SUPABASE_* env vars.',
+        error: 'Database unavailable. Check DATABASE_URL in server/.env.',
       });
     }
     if (!data) return res.status(401).json({ error: 'Invalid credentials' });
@@ -686,7 +686,7 @@ router.get('/analytics/summary', async (_req: Request, res: Response) => {
   try {
     const { data: leads, error } = await sb().from('leads').select('created_at,last_interaction,client_progress,funnel_status');
     if (error) throw error;
-    const rows = leads ?? [];
+    const rows: Record<string, unknown>[] = leads ?? [];
     const completed = rows.filter((l) => (l as { client_progress?: number }).client_progress === 100);
     let avgVelocityDays = 0;
     if (completed.length > 0) {

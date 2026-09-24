@@ -23,8 +23,8 @@ export function Overview() {
   return (
     <div>
       <PageHeader
-        title="Executive Command Center"
-        description="Unified view of discovery velocity, pipeline health, and core organizational drivers across your portfolio."
+        title="Overview"
+        description="Discovery velocity, pipeline health, and organizational drivers across your portfolio."
         actions={
           <Link to="/intake">
             <Button>+ New Lead</Button>
@@ -57,7 +57,7 @@ export function Overview() {
                   </div>
                   <div className="h-2 rounded-full bg-slate-100">
                     <div
-                      className="h-2 rounded-full bg-indigo-500 opacity-90"
+                      className="h-2 rounded-full bg-pbs-500 opacity-90"
                       style={{ width: `${Math.max(8, pct)}%`, opacity: 1 - i * 0.08 }}
                     />
                   </div>
@@ -76,7 +76,7 @@ export function Overview() {
                   <span className="w-40 shrink-0 text-xs font-medium text-slate-600">{d.driver}</span>
                   <div className="h-6 flex-1 overflow-hidden rounded bg-slate-100">
                     <div
-                      className="flex h-full items-center rounded bg-indigo-500/80 pl-2 text-xs font-medium text-white"
+                      className="flex h-full items-center rounded bg-pbs-500/80 pl-2 text-xs font-medium text-white"
                       style={{ width: `${(d.count / maxDriver) * 100}%` }}
                     >
                       {d.count}
@@ -103,7 +103,7 @@ export function Overview() {
               <tr key={l.id} className="border-b border-slate-50">
                 <td className="py-3 font-medium">{l.companyName}</td>
                 <td>
-                  <Badge tone="indigo">{l.funnelStatus.replace('_', ' ')}</Badge>
+                  <Badge tone="brand">{l.funnelStatus.replace('_', ' ')}</Badge>
                 </td>
                 <td className="text-slate-600">{l.assignedExecutive}</td>
                 <td className="text-slate-500">{l.lastInteraction}</td>

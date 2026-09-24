@@ -34,7 +34,7 @@ export function Profile() {
       <PageHeader title="My profile" description="Update your account details and password." />
       <Card>
         <div className="mb-4 flex items-center gap-2">
-          <Badge tone="indigo">{roleLabels[currentUser.role]}</Badge>
+          <Badge tone="brand">{roleLabels[currentUser.role]}</Badge>
           {currentUser.lastLogin && (
             <span className="text-xs text-slate-500">
               Last login: {new Date(currentUser.lastLogin).toLocaleString()}

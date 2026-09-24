@@ -306,7 +306,7 @@ export const driverHeatmap: DriverHeatmap[] = [
 export const funnelStages = [
   { key: 'intake', label: 'Lead Intake' },
   { key: 'research', label: 'Agent Research' },
-  { key: 'review', label: 'Executive Review' },
+  { key: 'review', label: 'Assessment' },
   { key: 'client_portal', label: 'Client Portal' },
   { key: 'analysis', label: 'Gap Analysis' },
   { key: 'proposal', label: 'Proposal' },

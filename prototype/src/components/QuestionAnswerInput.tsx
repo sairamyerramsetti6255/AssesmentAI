@@ -51,11 +51,11 @@ export function QuestionAnswerInput({
   const choiceClass = (on: boolean) => {
     if (portal) {
       return on
-        ? 'border-violet-400 bg-violet-600/35 text-white'
+        ? 'border-pbs-400 bg-violet-600/35 text-white'
         : 'border-slate-600 bg-slate-800/60 text-slate-200 hover:border-violet-500/50'
     }
     return on
-      ? 'border-indigo-600 bg-indigo-50 text-indigo-900'
+      ? 'border-pbs-600 bg-pbs-50 text-pbs-900'
       : 'border-slate-200 bg-white text-slate-800 hover:border-slate-300'
   }
 
@@ -81,12 +81,12 @@ export function QuestionAnswerInput({
           min={1}
           max={max}
           value={val}
-          className={`w-full ${portal ? 'portal-range' : 'accent-indigo-600'}`}
+          className={`w-full ${portal ? 'portal-range' : 'accent-pbs-600'}`}
           onChange={(e) => setAnswer(Number(e.target.value))}
         />
         <p
           className={`mt-3 text-center text-lg font-semibold ${
-            portal ? 'text-violet-300' : 'text-indigo-700'
+            portal ? 'text-pbs-300' : 'text-pbs-700'
           }`}
         >
           {val} <span className="text-sm font-normal opacity-70">/ {max}</span>

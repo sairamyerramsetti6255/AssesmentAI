@@ -1,49 +1,38 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
 import {
   defaultLeadIntakeForm,
   leadIntakeFormSamples,
 } from '../data/testData'
-import { generateAssessmentQuestions, runResearchPipeline } from '../lib/ai-services'
-import { mergeMandatoryQuestions } from '../lib/questions'
-import { OpenRouterApiError } from '../lib/openrouter'
 import { UploadedDocumentsTable } from '../components/UploadedDocumentsTable'
 import { IndustryVerticalField } from '../components/IndustryVerticalField'
+import { PageSection } from '../components/page-layout'
 import { resolveIndustryVertical } from '../data/industry-verticals'
 import { documentFromFile, normalizeDocuments } from '../lib/documents'
-import { Badge, Button, Card, Input, PageHeader, ProgressBar, Select } from '../components/ui'
-
-type AgentStep = 'Document Extractor' | 'Web Scraping' | 'Competitive Intelligence' | 'Executive Brief'
+import type { LeadStatus, LeadType } from '../types'
+import { leadStatusOptions, leadTypeOptions } from '../data/constants'
+import { Button, Input, PageHeader, Select } from '../components/ui'
 
 export function LeadIntake() {
   const navigate = useNavigate()
-  const {
-    leads,
-    selectedLeadId,
-    setSelectedLeadId,
-    selectedLead,
-    addLead,
-    startResearch,
-    finishResearch,
-    setQuestions,
-    setLeadTaxonomy,
-    mandatoryQuestions,
-    currentUser,
-  } = useApp()
+  const { addLead, currentUser } = useApp()
   const [form, setForm] = useState({
     companyName: '',
     industry: 'Supply Chain & Logistics',
     industryOther: '',
     domain: '',
     country: '',
+    clientEmail: '',
+    clientPhone: '',
+    availableTime: '',
+    intakeRemarks: '',
+    leadStatus: 'new' as LeadStatus,
+    leadType: 'inbound' as LeadType,
   })
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
-  const [agents, setAgents] = useState<{ name: AgentStep; status: string }[]>([])
   const [sampleIndex, setSampleIndex] = useState(0)
-  const [aiLoading, setAiLoading] = useState(false)
-  const [aiError, setAiError] = useState<string | null>(null)
-  const [generateQuestions, setGenerateQuestions] = useState(true)
+  const [createdName, setCreatedName] = useState<string | null>(null)
 
   const fillTestData = (index = sampleIndex) => {
     const sample = leadIntakeFormSamples[index % leadIntakeFormSamples.length]
@@ -53,6 +42,12 @@ export function LeadIntake() {
       industryOther: sample.industry.startsWith('Other') ? sample.industry : '',
       domain: sample.domain,
       country: sample.country,
+      clientEmail: sample.clientEmail,
+      clientPhone: sample.clientPhone,
+      availableTime: sample.availableTime,
+      intakeRemarks: sample.intakeRemarks,
+      leadStatus: sample.leadStatus,
+      leadType: sample.leadType,
     })
     setPendingFiles(
       sample.documents.map(
@@ -70,16 +65,29 @@ export function LeadIntake() {
       industry,
       domain: form.domain,
       country: form.country,
+      clientEmail: form.clientEmail,
+      clientPhone: form.clientPhone,
+      availableTime: form.availableTime,
+      intakeRemarks: form.intakeRemarks,
+      leadStatus: form.leadStatus,
+      leadType: form.leadType,
       assignedExecutive: currentUser?.name ?? 'Unassigned',
       pendingFiles,
       documentRecords: pendingFiles.map((f) => documentFromFile(f, 'intake')),
     })
+    setCreatedName(form.companyName)
     setForm({
       companyName: '',
       industry: 'Supply Chain & Logistics',
       industryOther: '',
       domain: '',
       country: '',
+      clientEmail: '',
+      clientPhone: '',
+      availableTime: '',
+      intakeRemarks: '',
+      leadStatus: 'new',
+      leadType: 'inbound',
     })
     setPendingFiles([])
   }
@@ -95,289 +103,164 @@ export function LeadIntake() {
 
   const pendingPreview = pendingFiles.map((f) => documentFromFile(f, 'intake'))
 
-  const setAgentStatus = (name: AgentStep, status: string) => {
-    setAgents((prev) => {
-      const existing = prev.find((a) => a.name === name)
-      if (existing) return prev.map((a) => (a.name === name ? { ...a, status } : a))
-      return [...prev, { name, status }]
-    })
-  }
-
-  const runAgents = async () => {
-    if (!selectedLead) return
-    setAiError(null)
-    setAiLoading(true)
-    startResearch(selectedLead.id)
-
-    setAgents([
-      { name: 'Web Scraping', status: 'running' },
-      { name: 'Document Extractor', status: 'queued' },
-      { name: 'Competitive Intelligence', status: 'queued' },
-      { name: 'Executive Brief', status: 'queued' },
-    ])
-
-    try {
-      setAgentStatus('Web Scraping', 'running')
-      const research = await runResearchPipeline(selectedLead)
-      setAgentStatus('Web Scraping', 'done')
-      setAgentStatus('Document Extractor', 'done')
-      setAgentStatus('Competitive Intelligence', 'done')
-      setAgentStatus('Executive Brief', 'running')
-
-      finishResearch(selectedLead.id, research)
-
-      if (generateQuestions) {
-        const generated = await generateAssessmentQuestions(selectedLead, research)
-        setQuestions(mergeMandatoryQuestions(generated.questions, mandatoryQuestions))
-        setLeadTaxonomy(selectedLead.id, generated.taxonomy)
-      }
-
-      setAgentStatus('Executive Brief', 'done')
-    } catch (e) {
-      setAiError(
-        e instanceof OpenRouterApiError
-          ? e.message
-          : 'AI pipeline failed. Wait 1–2 minutes and retry, or check OPENROUTER_API_KEY on the API server.',
-      )
-      setAgents((a) => a.map((x) => (x.status === 'running' ? { ...x, status: 'error' } : x)))
-    } finally {
-      setAiLoading(false)
-    }
-  }
-
-  const research = selectedLead?.aiResearch
-
   return (
-    <div>
+    <div className="space-y-8">
       <PageHeader
-        title="Lead Intake & Agentic Research"
-        description="Module 1 — AI agents scrape the client website, analyze documents, and generate discovery output."
+        title="Lead Intake"
+        description="Register a new company and contact details. Research and assessment happen on the next steps."
         actions={
           <Button variant="secondary" onClick={() => fillTestData()}>
             Fill test data
           </Button>
         }
       />
-      {aiError && (
-        <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-          {aiError}
+
+      {createdName && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          <strong>{createdName}</strong> created successfully.{' '}
+          <button
+            type="button"
+            className="font-medium text-pbs-700 underline"
+            onClick={() => navigate('/research')}
+          >
+            Continue to Agent Research →
+          </button>
         </div>
       )}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card title="Lead onboarding form">
-          <form onSubmit={handleSubmit} className="space-y-4">
+
+      <PageSection title="Create new lead" description="One form — company, contact, and intake documents only.">
+        <form onSubmit={handleSubmit} className="mx-auto max-w-2xl space-y-4">
+          <Input
+            label="Company name"
+            required
+            value={form.companyName}
+            onChange={(e) => setForm({ ...form, companyName: e.target.value })}
+          />
+          <IndustryVerticalField
+            value={form.industry}
+            otherDetail={form.industryOther}
+            onChange={(industry) => setForm({ ...form, industry })}
+            onOtherDetailChange={(industryOther) => setForm({ ...form, industryOther })}
+          />
+          <Input
+            label="Domain / URL"
+            placeholder="example.com"
+            required
+            value={form.domain}
+            onChange={(e) => setForm({ ...form, domain: e.target.value })}
+          />
+          <Input
+            label="Country of operation"
+            value={form.country}
+            onChange={(e) => setForm({ ...form, country: e.target.value })}
+          />
+          <div className="grid gap-4 sm:grid-cols-2">
             <Input
-              label="Company name"
+              label="Client primary email"
+              type="email"
               required
-              value={form.companyName}
-              onChange={(e) => setForm({ ...form, companyName: e.target.value })}
-            />
-            <IndustryVerticalField
-              value={form.industry}
-              otherDetail={form.industryOther}
-              onChange={(industry) => setForm({ ...form, industry })}
-              onOtherDetailChange={(industryOther) => setForm({ ...form, industryOther })}
+              placeholder="contact@company.com"
+              value={form.clientEmail}
+              onChange={(e) => setForm({ ...form, clientEmail: e.target.value })}
             />
             <Input
-              label="Domain / URL"
-              placeholder="example.com"
-              required
-              value={form.domain}
-              onChange={(e) => setForm({ ...form, domain: e.target.value })}
+              label="Phone number"
+              type="tel"
+              placeholder="+1 555 0100"
+              value={form.clientPhone}
+              onChange={(e) => setForm({ ...form, clientPhone: e.target.value })}
             />
-            <Input
-              label="Country of operation"
-              value={form.country}
-              onChange={(e) => setForm({ ...form, country: e.target.value })}
-            />
-            <div
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={handleDrop}
-              className="rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 p-6 text-center"
-            >
-              <p className="text-sm font-medium text-slate-700">Document ingestion port</p>
-              <p className="mt-1 text-xs text-slate-500">Drag PDF or DOCX (filenames used for AI context)</p>
-              <label className="mt-3 inline-block cursor-pointer rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-indigo-600 ring-1 ring-indigo-200 hover:bg-indigo-50">
-                Choose files
-                <input
-                  type="file"
-                  multiple
-                  className="hidden"
-                  accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.xls,.xlsx,.csv"
-                  onChange={(e) => {
-                    if (e.target.files) addDroppedFiles(e.target.files)
-                    e.target.value = ''
-                  }}
-                />
-              </label>
-              <Button
-                type="button"
-                variant="ghost"
-                className="mt-2 !text-xs"
-                onClick={() =>
-                  setPendingFiles(
-                    normalizeDocuments(defaultLeadIntakeForm.documents, 'intake').map(
-                      (d) => new File([`Sample: ${d.name}`], d.name, { type: 'text/plain' }),
-                    ),
-                  )
-                }
-              >
-                Add sample documents
-              </Button>
-              {pendingPreview.length > 0 && (
-                <div className="mt-4 text-left">
-                  <UploadedDocumentsTable
-                    documents={pendingPreview}
-                    emptyMessage=""
-                  />
-                </div>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <Button type="submit" className="flex-1">
-                Create lead
-              </Button>
-              <Button type="button" variant="secondary" onClick={() => fillTestData()}>
-                Load sample
-              </Button>
-            </div>
-          </form>
-        </Card>
-        <div className="space-y-4">
-          <Card title="AI multi-agent pipeline">
+          </div>
+          <Input
+            label="Available time / preferred contact window"
+            placeholder="e.g. Mon–Fri 9:00–17:00 EST"
+            value={form.availableTime}
+            onChange={(e) => setForm({ ...form, availableTime: e.target.value })}
+          />
+          <div className="grid gap-4 sm:grid-cols-2">
             <Select
-              label="Active leads"
-              value={selectedLeadId ?? ''}
-              onChange={(e) => setSelectedLeadId(e.target.value || null)}
-              options={[
-                { value: '', label: '— Select —' },
-                ...leads.map((l) => ({ value: l.id, label: l.companyName })),
-              ]}
+              label="Lead status"
+              value={form.leadStatus}
+              onChange={(e) =>
+                setForm({ ...form, leadStatus: e.target.value as typeof form.leadStatus })
+              }
+              options={leadStatusOptions.map((o) => ({ value: o.value, label: o.label }))}
             />
-            {selectedLead && (
-              <div className="mt-4 space-y-3">
-                <div className="flex flex-wrap gap-2 text-xs">
-                  <Badge>{selectedLead.industry}</Badge>
-                  <Badge tone="slate">{selectedLead.country}</Badge>
-                  <Badge tone="amber">{selectedLead.funnelStatus}</Badge>
-                </div>
-                <label className="flex items-center gap-2 text-xs text-slate-600">
-                  <input
-                    type="checkbox"
-                    checked={generateQuestions}
-                    onChange={(e) => setGenerateQuestions(e.target.checked)}
-                  />
-                  Also generate assessment questions (Review Workspace)
-                </label>
-                <ProgressBar value={selectedLead.researchProgress} label="Research pipeline" />
-                <Button
-                  onClick={runAgents}
-                  disabled={aiLoading || !selectedLead.domain}
-                  className="w-full"
-                >
-                  {aiLoading
-                    ? 'Running AI agents…'
-                    : selectedLead.researchProgress >= 100
-                      ? 'Re-run AI research'
-                      : 'Run scrape + research + AI brief'}
-                </Button>
-                {aiLoading && (
-                  <p className="text-center text-xs text-slate-500">
-                    Free AI model can take 30–90 seconds. Keep this tab open — &quot;Provisional headers&quot; in
-                    DevTools is normal while waiting.
-                  </p>
-                )}
-                {selectedLead.researchProgress >= 100 && (
-                  <Button variant="secondary" className="w-full" onClick={() => navigate('/review')}>
-                    Open Review Workspace →
-                  </Button>
-                )}
-              </div>
-            )}
-          </Card>
-          <Card title="Agent status">
-            {agents.length === 0 ? (
-              <p className="text-sm text-slate-500">
-                Select a lead with a domain, then run the pipeline. Website text is scraped server-side for AI analysis.
-              </p>
-            ) : (
-              <ul className="space-y-2">
-                {agents.map((a) => (
-                  <li
-                    key={a.name}
-                    className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm"
-                  >
-                    <span className="font-medium">{a.name}</span>
-                    <Badge
-                      tone={
-                        a.status === 'done'
-                          ? 'emerald'
-                          : a.status === 'running'
-                            ? 'indigo'
-                            : a.status === 'error'
-                              ? 'rose'
-                              : 'slate'
-                      }
-                    >
-                      {a.status}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-          {selectedLead && selectedLead.documents.length > 0 && (
-            <Card title="Uploaded documents">
-              <UploadedDocumentsTable
-                leadId={selectedLead.id}
-                documents={selectedLead.documents}
+            <Select
+              label="Lead type"
+              value={form.leadType}
+              onChange={(e) =>
+                setForm({ ...form, leadType: e.target.value as typeof form.leadType })
+              }
+              options={leadTypeOptions.map((o) => ({ value: o.value, label: o.label }))}
+            />
+          </div>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-slate-600">Intake remarks</span>
+            <textarea
+              className="min-h-[4rem] w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-pbs-500 focus:outline-none focus:ring-2 focus:ring-pbs-500/20"
+              placeholder="Context, referral source, urgency, decision makers…"
+              value={form.intakeRemarks}
+              onChange={(e) => setForm({ ...form, intakeRemarks: e.target.value })}
+            />
+          </label>
+          <div
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={handleDrop}
+            className="rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 p-6 text-center"
+          >
+            <p className="text-sm font-medium text-slate-700">Document upload</p>
+            <p className="mt-1 text-xs text-slate-500">Drag PDF or DOCX (filenames used for AI context)</p>
+            <label className="mt-3 inline-block cursor-pointer rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-pbs-600 ring-1 ring-pbs-200 hover:bg-pbs-50">
+              Choose files
+              <input
+                type="file"
+                multiple
+                className="hidden"
+                accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.xls,.xlsx,.csv"
+                onChange={(e) => {
+                  if (e.target.files) addDroppedFiles(e.target.files)
+                  e.target.value = ''
+                }}
               />
-            </Card>
-          )}
-          {research && (
-            <Card title="AI research output">
-              <div className="space-y-3 text-xs text-slate-600">
-                <p>
-                  <span className="font-semibold text-slate-700">Scraped:</span>{' '}
-                  {research.webScrapeUrl}
-                  {research.webScrapeError && (
-                    <span className="text-amber-700"> ({research.webScrapeError})</span>
-                  )}
-                </p>
-                <div>
-                  <p className="font-semibold text-slate-700">Web insights</p>
-                  <ul className="mt-1 list-inside list-disc">
-                    {research.webInsights.map((w) => (
-                      <li key={w}>{w}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div>
-                  <p className="font-semibold text-slate-700">Competitive intelligence</p>
-                  <ul className="mt-1 list-inside list-disc">
-                    {research.competitors.map((c) => (
-                      <li key={c}>{c}</li>
-                    ))}
-                  </ul>
-                </div>
-                {research.documentInsights.length > 0 && (
-                  <div>
-                    <p className="font-semibold text-slate-700">Document extractor</p>
-                    <ul className="mt-1 list-inside list-disc">
-                      {research.documentInsights.map((d) => (
-                        <li key={d}>{d}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-900 p-3 text-slate-100">
-                  {research.executiveBrief}
-                </pre>
+            </label>
+            <Button
+              type="button"
+              variant="ghost"
+              className="mt-2 !text-xs"
+              onClick={() =>
+                setPendingFiles(
+                  normalizeDocuments(defaultLeadIntakeForm.documents, 'intake').map(
+                    (d) => new File([`Sample: ${d.name}`], d.name, { type: 'text/plain' }),
+                  ),
+                )
+              }
+            >
+              Add sample documents
+            </Button>
+            {pendingPreview.length > 0 && (
+              <div className="mt-4 text-left">
+                <UploadedDocumentsTable documents={pendingPreview} emptyMessage="" />
               </div>
-            </Card>
-          )}
-        </div>
-      </div>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button type="submit" className="flex-1">
+              Create lead
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => fillTestData()}>
+              Load sample
+            </Button>
+          </div>
+        </form>
+      </PageSection>
+
+      <p className="text-center text-sm text-slate-500">
+        Next step:{' '}
+        <Link to="/research" className="font-medium text-pbs-600 hover:underline">
+          Agent Research
+        </Link>
+      </p>
     </div>
   )
 }

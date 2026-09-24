@@ -99,16 +99,16 @@ export function ExecutiveAssessmentTools({ lead, compact }: Props) {
   }
 
   return (
-    <Card title="Client assessment delivery">
+    <Card title="Client response">
       {!approved ? (
         <p className="text-sm text-amber-800">
-          Approve the assessment in Review Workspace to generate a secure portal link.
+          Approve the assessment in Assessment Workspace to generate a secure portal link.
         </p>
       ) : (
         <div className="space-y-4">
           <div>
             <p className="text-xs font-medium text-slate-500">Secure portal link</p>
-            <p className="mt-1 break-all font-mono text-sm text-indigo-700">{portalUrl(token!, false)}</p>
+            <p className="mt-1 break-all font-mono text-sm text-pbs-700">{portalUrl(token!, false)}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={() => copyLink(false)}>

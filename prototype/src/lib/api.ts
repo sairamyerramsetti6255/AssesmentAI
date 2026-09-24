@@ -5,6 +5,7 @@
 
 import { resolveApiUrl } from './apiBase'
 import { normalizeDocuments } from './documents'
+import { normalizeAssessmentTaxonomy } from './questions'
 import type {
   Lead,
   LeadDocument,
@@ -97,11 +98,17 @@ export function getLeads(): Promise<Lead[]> {
 }
 
 export function getLead(id: string): Promise<Lead> {
-  return request(`/api/proto/leads/${id}`)
+  return request(`/api/proto/leads/${id}`).then((r) => dbToLead(r as unknown as DbLead))
 }
 
 export function createLead(
   data: Pick<Lead, 'companyName' | 'industry' | 'domain' | 'country' | 'assignedExecutive'> & {
+    clientEmail?: string
+    clientPhone?: string
+    availableTime?: string
+    intakeRemarks?: string
+    leadStatus?: Lead['leadStatus']
+    leadType?: Lead['leadType']
     documents?: string[]
     documentRecords?: LeadDocument[]
   },
@@ -114,6 +121,12 @@ export function createLead(
       domain: data.domain,
       country: data.country,
       assigned_executive: data.assignedExecutive,
+      client_email: data.clientEmail ?? '',
+      client_phone: data.clientPhone ?? '',
+      available_time: data.availableTime ?? '',
+      intake_remarks: data.intakeRemarks ?? '',
+      lead_status: data.leadStatus ?? 'new',
+      lead_type: data.leadType ?? 'inbound',
       documents: data.documents ?? data.documentRecords?.map((d) => d.name) ?? [],
       document_records: data.documentRecords?.map(dbFromLeadDocument),
     }),
@@ -189,6 +202,12 @@ export function approveLead(id: string): Promise<Lead> {
   return request(`/api/proto/leads/${id}/approve`, { method: 'POST' })
 }
 
+export function resetAssessment(leadId: string): Promise<Lead> {
+  return request(`/api/proto/leads/${leadId}/reset-assessment`, { method: 'POST' }).then(
+    (r) => dbToLead(r as unknown as DbLead),
+  )
+}
+
 export function saveClientResponses(
   id: string,
   answers: Record<string, unknown>,
@@ -197,6 +216,7 @@ export function saveClientResponses(
   extras?: {
     otherText?: Record<string, string>
     uploadedDocuments?: LeadDocument[]
+    submitted?: boolean
   },
 ): Promise<DbLead> {
   return request(`/api/proto/leads/${id}/client-responses`, {
@@ -205,6 +225,7 @@ export function saveClientResponses(
       answers,
       richtext,
       progress,
+      submitted: extras?.submitted === true,
       other_text: extras?.otherText,
       uploaded_docs: extras?.uploadedDocuments?.map((d) => d.name),
       client_document_records: extras?.uploadedDocuments?.map(dbFromLeadDocument),
@@ -232,6 +253,7 @@ export function savePortalResponses(
   extras?: {
     otherText?: Record<string, string>
     uploadedDocuments?: LeadDocument[]
+    submitted?: boolean
   },
 ): Promise<Lead> {
   return request(`/api/proto/portal/${token}/client-responses`, {
@@ -240,6 +262,7 @@ export function savePortalResponses(
       answers,
       richtext,
       progress,
+      submitted: extras?.submitted === true,
       other_text: extras?.otherText,
       uploaded_docs: extras?.uploadedDocuments?.map((d) => d.name),
       client_document_records: extras?.uploadedDocuments?.map(dbFromLeadDocument),
@@ -251,6 +274,7 @@ export function saveProposal(
   leadId: string,
   useCases: UseCase[],
   architecture: Lead['proposalArchitecture'],
+  extras?: { summary?: string; nextSteps?: string[]; proposalDocument?: Lead['proposalDocument'] },
 ): Promise<Lead> {
   return request(`/api/proto/leads/${leadId}/proposal`, {
     method: 'PUT',
@@ -263,8 +287,42 @@ export function saveProposal(
         impact: uc.impact,
       })),
       architecture,
+      summary: extras?.summary,
+      next_steps: extras?.nextSteps,
+      proposal_document: extras?.proposalDocument,
     }),
   }).then((r) => dbToLead(r as unknown as DbLead))
+}
+
+export async function getClientResponses(leadId: string): Promise<import('./client-responses').ClientResponsesPayload> {
+  const raw = await request<{
+    lead_id: string
+    company_name: string
+    client_progress: number
+    assessment_started_at: string | null
+    assessment_submitted_at: string | null
+    assessment_updated_at: string | null
+    responses: Array<Record<string, unknown>>
+  }>(`/api/proto/leads/${leadId}/client-responses`)
+
+  return {
+    leadId: raw.lead_id,
+    companyName: raw.company_name,
+    clientProgress: raw.client_progress ?? 0,
+    assessmentStartedAt: raw.assessment_started_at,
+    assessmentSubmittedAt: raw.assessment_submitted_at,
+    assessmentUpdatedAt: raw.assessment_updated_at,
+    responses: (raw.responses ?? []).map((r) => ({
+      id: String(r.id),
+      questionId: String(r.question_id ?? ''),
+      questionText: String(r.question_text ?? ''),
+      taxonomyPillar: String(r.taxonomy_pillar ?? ''),
+      responseType: String(r.response_type ?? ''),
+      answerDisplay: String(r.answer_display ?? ''),
+      sortOrder: Number(r.sort_order ?? 0),
+      answeredAt: String(r.answered_at ?? r.created_at ?? ''),
+    })),
+  }
 }
 
 export function getDriverHeatmap(): Promise<DriverHeatmap[]> {
@@ -289,7 +347,7 @@ export function getQuestions(leadId: string): Promise<AssessmentQuestion[]> {
 
 /** Full replace — send all questions for a lead */
 export function saveQuestions(leadId: string, questions: AssessmentQuestion[]): Promise<AssessmentQuestion[]> {
-  return request(`/api/proto/leads/${leadId}/questions`, {
+  return request<Record<string, unknown>[]>(`/api/proto/leads/${leadId}/questions`, {
     method: 'PUT',
     body: JSON.stringify(
       questions.map((q) => ({
@@ -305,7 +363,7 @@ export function saveQuestions(leadId: string, questions: AssessmentQuestion[]): 
         is_mandatory: q.isMandatory ?? false,
       })),
     ),
-  })
+  }).then((rows) => rows.map(dbToQuestion))
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -412,6 +470,18 @@ export interface DbLead {
   assessment_taxonomy?: Record<string, unknown>
   proposal_use_cases?: Array<Record<string, unknown>>
   proposal_architecture?: Record<string, string>
+  proposal_summary?: string
+  proposal_next_steps?: string[]
+  proposal_document?: Record<string, unknown>
+  client_assessment_started_at?: string
+  client_assessment_submitted_at?: string
+  client_assessment_updated_at?: string
+  client_email?: string
+  client_phone?: string
+  available_time?: string
+  intake_remarks?: string
+  lead_status?: string
+  lead_type?: string
   last_interaction: string
   created_at: string
   updated_at: string
@@ -458,11 +528,20 @@ export function dbToLead(r: DbLead): Lead {
     domain: r.domain,
     country: r.country,
     assignedExecutive: r.assigned_executive,
+    clientEmail: r.client_email,
+    clientPhone: r.client_phone,
+    availableTime: r.available_time,
+    intakeRemarks: r.intake_remarks,
+    leadStatus: r.lead_status as Lead['leadStatus'],
+    leadType: r.lead_type as Lead['leadType'],
     funnelStatus: r.funnel_status as Lead['funnelStatus'],
     assessmentStatus: r.assessment_status as Lead['assessmentStatus'],
     portalToken: r.portal_token,
     researchProgress: r.research_progress ?? 0,
     clientProgress: r.client_progress,
+    clientAssessmentStartedAt: r.client_assessment_started_at,
+    clientAssessmentSubmittedAt: r.client_assessment_submitted_at,
+    clientAssessmentUpdatedAt: r.client_assessment_updated_at,
     documents: documentRecords,
     remarks: r.remarks ?? [],
     clientAnswers: r.client_answers as Lead['clientAnswers'],
@@ -470,9 +549,14 @@ export function dbToLead(r: DbLead): Lead {
     clientOtherText: r.client_other_text,
     clientUploadedDocuments: clientRecords,
     aiResearch: r.ai_research as Lead['aiResearch'],
-    assessmentTaxonomy: r.assessment_taxonomy as Lead['assessmentTaxonomy'],
+    assessmentTaxonomy: normalizeAssessmentTaxonomy(
+      r.assessment_taxonomy as Lead['assessmentTaxonomy'],
+    ),
     proposalUseCases: (r.proposal_use_cases as UseCase[] | undefined) ?? undefined,
+    proposalSummary: r.proposal_summary,
+    proposalNextSteps: r.proposal_next_steps,
     proposalArchitecture: r.proposal_architecture as Lead['proposalArchitecture'],
+    proposalDocument: r.proposal_document as Lead['proposalDocument'],
     lastInteraction: r.last_interaction,
     createdAt: r.created_at?.slice(0, 10) ?? '',
   }

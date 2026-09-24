@@ -62,7 +62,8 @@ interface AppContextValue {
   updateQuestion: (id: string, patch: Partial<AssessmentQuestion>) => void
   deleteQuestion: (id: string) => void
   setLeadTaxonomy: (leadId: string, taxonomy: AssessmentTaxonomy) => Promise<void>
-  setAssessmentStatus: (leadId: string, status: AssessmentStatus) => Promise<void>
+  setAssessmentStatus: (leadId: string, status: AssessmentStatus) => Promise<Lead | undefined>
+  deleteAssessment: (leadId: string) => Promise<void>
   addRemark: (leadId: string, text: string) => Promise<void>
   moveLeadStatus: (leadId: string, status: Lead['funnelStatus']) => Promise<void>
   saveClientResponses: (
@@ -96,10 +97,13 @@ interface AppContextValue {
   ) => Promise<void>
   refreshLeads: () => Promise<void>
   refreshQuestions: (leadId: string) => Promise<void>
+  questionsSaveStatus: 'idle' | 'saving' | 'saved' | 'error'
+  questionsSaveError: string | null
   saveProposal: (
     leadId: string,
     useCases: import('../types').UseCase[],
     architecture: Lead['proposalArchitecture'],
+    extras?: { summary?: string; nextSteps?: string[]; proposalDocument?: Lead['proposalDocument'] },
   ) => Promise<void>
 }
 
@@ -127,6 +131,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null)
   const [currentUser, setCurrentUser] = useState<PlatformUser | null>(null)
   const [loading, setLoading] = useState(true)
+  const [questionsSaveStatus, setQuestionsSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [questionsSaveError, setQuestionsSaveError] = useState<string | null>(null)
 
   const selectedLead = leads.find((l) => l.id === selectedLeadId)
 
@@ -205,9 +211,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     leadId: string,
     useCases: import('../types').UseCase[],
     architecture: Lead['proposalArchitecture'],
+    extras?: { summary?: string; nextSteps?: string[]; proposalDocument?: Lead['proposalDocument'] },
   ) => {
     if (!architecture) return
-    const lead = await api.saveProposal(leadId, useCases, architecture)
+    const lead = await api.saveProposal(leadId, useCases, architecture, extras)
     setLeads((prev) => prev.map((l) => (l.id === leadId ? lead : l)))
   }, [])
 
@@ -238,11 +245,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const persistQuestions = useCallback(async (leadId: string, qs: AssessmentQuestion[]) => {
     try {
-      await api.saveQuestions(leadId, qs)
+      setQuestionsSaveStatus('saving')
+      setQuestionsSaveError(null)
+      const saved = await api.saveQuestions(leadId, qs)
+      const synced = syncAssessmentWithMandatory(saved, mandatoryQuestions)
+      setQuestionsState(synced)
+      setQuestionsSaveStatus('saved')
+      window.setTimeout(() => setQuestionsSaveStatus('idle'), 2000)
     } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to save questions'
+      setQuestionsSaveError(msg)
+      setQuestionsSaveStatus('error')
       console.error('[AppContext] saveQuestions failed:', e)
+      throw e
     }
-  }, [])
+  }, [mandatoryQuestions])
 
   // ── AUTH ───────────────────────────────────────────────────────────────
 
@@ -285,6 +302,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       domain: input.domain,
       country: input.country,
       assignedExecutive: input.assignedExecutive,
+      clientEmail: input.clientEmail,
+      clientPhone: input.clientPhone,
+      availableTime: input.availableTime,
+      intakeRemarks: input.intakeRemarks,
+      leadStatus: input.leadStatus,
+      leadType: input.leadType,
       documentRecords: input.documentRecords,
     })
     let lead = api.dbToLead(raw as unknown as api.DbLead)
@@ -335,12 +358,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     setLeads((prev) => prev.map((l) => l.id === leadId ? raw : l))
     if (status === 'approved') {
-      const lead = leads.find((l) => l.id === leadId)
-      await doLogActivity('assessment.approve', `Assessment approved for ${lead?.companyName}`, {
-        leadId, companyName: lead?.companyName,
+      await doLogActivity('assessment.approve', `Assessment approved for ${raw.companyName}`, {
+        leadId, companyName: raw.companyName,
       })
     }
-  }, [leads, doLogActivity])
+    return raw
+  }, [doLogActivity])
+
+  const deleteAssessment = useCallback(async (leadId: string) => {
+    const raw = await api.resetAssessment(leadId)
+    setLeads((prev) => prev.map((l) => (l.id === leadId ? raw : l)))
+    if (selectedLeadId === leadId) {
+      const synced = syncAssessmentWithMandatory([], mandatoryQuestions)
+      setQuestionsState(synced)
+    }
+    await doLogActivity('assessment.delete', `Assessment deleted and reset — ${raw.companyName}`, {
+      leadId,
+      companyName: raw.companyName,
+    })
+  }, [mandatoryQuestions, selectedLeadId, doLogActivity])
 
   const addRemark = useCallback(async (leadId: string, text: string) => {
     if (!text.trim()) return
@@ -551,6 +587,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       deleteQuestion,
       setLeadTaxonomy,
       setAssessmentStatus,
+      deleteAssessment,
       addRemark,
       moveLeadStatus,
       saveClientResponses,
@@ -574,13 +611,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       logActivity: doLogActivity,
       refreshLeads,
       refreshQuestions,
+      questionsSaveStatus,
+      questionsSaveError,
       saveProposal,
     }),
     [
       leads, questions, selectedLeadId, selectedLead, loading,
+      questionsSaveStatus, questionsSaveError,
       addLead, startResearch, finishResearch, setQuestionsAndPersist,
       addQuestion, moveQuestionUp, moveQuestionDown, updateQuestion, deleteQuestion,
-      setLeadTaxonomy, setAssessmentStatus, addRemark, moveLeadStatus, saveClientResponses,
+      setLeadTaxonomy, setAssessmentStatus, deleteAssessment, addRemark, moveLeadStatus, saveClientResponses,
       platformUsers, registerPlatformUser,
       masterData, addMasterDataItem, updateMasterDataItem, deleteMasterDataItem,
       mandatoryQuestions, addMandatoryQuestion, updateMandatoryQuestion, deleteMandatoryQuestion,

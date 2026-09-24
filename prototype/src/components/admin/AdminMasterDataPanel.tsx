@@ -143,7 +143,7 @@ export function AdminMasterDataPanel({
       {tab === 'questions' && (
         <p className="mb-3 text-xs text-slate-500">
           These questions are always included at the start of every assessment. Edit text and
-          options below — changes apply immediately to Review and the client portal.
+          options below — changes apply immediately to Assessment Workspace and the client portal.
         </p>
       )}
 
@@ -194,7 +194,7 @@ export function AdminMasterDataPanel({
                         <button
                           type="button"
                           title="Edit"
-                          className="rounded p-1.5 text-slate-500 hover:bg-indigo-50 hover:text-indigo-700"
+                          className="rounded p-1.5 text-slate-500 hover:bg-pbs-50 hover:text-pbs-700"
                           onClick={() => startEditMaster(tab, item)}
                         >
                           <PencilIcon />
@@ -334,7 +334,7 @@ export function AdminMasterDataPanel({
                       <button
                         type="button"
                         title="Edit question and options"
-                        className="rounded p-1.5 text-slate-500 hover:bg-indigo-50 hover:text-indigo-700"
+                        className="rounded p-1.5 text-slate-500 hover:bg-pbs-50 hover:text-pbs-700"
                         onClick={() => startEditQuestion(q)}
                       >
                         <PencilIcon />

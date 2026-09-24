@@ -4,7 +4,9 @@ import { RequireAuth } from './components/RequireAuth'
 import { ClientPortalLayout, Layout } from './components/Layout'
 import { Overview } from './pages/Overview'
 import { LeadIntake } from './pages/LeadIntake'
-import { ReviewWorkspace } from './pages/ReviewWorkspace'
+import { LeadResearch } from './pages/LeadResearch'
+import { AssessmentWorkspace } from './pages/AssessmentWorkspace'
+import { ClientResponse } from './pages/ClientResponse'
 import { Pipeline } from './pages/Pipeline'
 import { Proposal } from './pages/Proposal'
 import { Admin } from './pages/Admin'
@@ -27,7 +29,11 @@ export default function App() {
             <Route element={<Layout />}>
               <Route index element={<Overview />} />
               <Route path="intake" element={<LeadIntake />} />
-              <Route path="review" element={<ReviewWorkspace />} />
+              <Route path="research" element={<LeadResearch />} />
+              <Route path="assessment" element={<AssessmentWorkspace />} />
+              <Route path="review" element={<Navigate to="/assessment" replace />} />
+              <Route path="client-response" element={<ClientResponse />} />
+              <Route path="delivery" element={<Navigate to="/client-response" replace />} />
               <Route path="pipeline" element={<Pipeline />} />
               <Route path="proposal" element={<Proposal />} />
               <Route path="analytics" element={<Analytics />} />

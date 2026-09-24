@@ -25,6 +25,7 @@ import mastersRoutes from './routes/masters.js';
 import portalRoutes from './routes/portal.js';
 import prototypeAiRoutes from './routes/prototypeAi.js';
 import prototypeDataRoutes from './routes/prototypeData.js';
+import { verifyDbConnection } from './lib/db.js';
 import { demoStore } from './lib/demoStore.js';
 import { getOpenRouterConfigFromEnv } from './lib/openrouter/openrouterClient.js';
 import { loadAuthSessions } from './lib/sessionStore.js';
@@ -100,7 +101,7 @@ app.get('/api/health', (_req, res) => {
 /** Prototype UI — OpenRouter AI routes only (same-origin /api/*). */
 app.use('/api', prototypeAiRoutes);
 
-/** Prototype UI — Supabase data routes */
+/** Prototype UI — Neon data routes */
 app.use('/api/proto', prototypeDataRoutes);
 
 app.use('/api/masters', mastersRoutes);
@@ -139,6 +140,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Assessment ai API on http://0.0.0.0:${PORT} (Coolify Ports Exposes must match)`);
   console.log(`CORS: ${allowedOrigins.join(', ')} + *.pbshope.in, *.graylogic.cloud`);
   if (fs.existsSync(indexHtml)) console.log('Serving frontend from /public (same-origin, no CORS)');
+  verifyDbConnection().catch((e) => console.error('[db] connection check failed:', e.message));
 });
 
 server.on('error', (err: NodeJS.ErrnoException) => {

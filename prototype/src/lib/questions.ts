@@ -1,4 +1,24 @@
-import type { AssessmentQuestion, MandatoryQuestion, TaxonomyPillar } from '../types'
+import type { AssessmentQuestion, AssessmentTaxonomy, MandatoryQuestion, TaxonomyPillar } from '../types'
+
+/** Ensure taxonomy arrays exist — API/DB may return partial objects after AI retry. */
+export function normalizeAssessmentTaxonomy(
+  taxonomy?: Partial<AssessmentTaxonomy> | Record<string, unknown> | null,
+): AssessmentTaxonomy | undefined {
+  if (!taxonomy || typeof taxonomy !== 'object') return undefined
+  const t = taxonomy as Record<string, unknown>
+  return {
+    userDomain: String(taxonomy.userDomain ?? t.user_domain ?? ''),
+    technicalPainPoints: (taxonomy.technicalPainPoints ??
+      t.technical_pain_points ??
+      []) as string[],
+    operationalPainAreas: (taxonomy.operationalPainAreas ??
+      t.operational_pain_areas ??
+      []) as string[],
+    processImprovements: (taxonomy.processImprovements ??
+      t.process_improvements ??
+      []) as string[],
+  }
+}
 import { OTHER_OPTION, ensureChoiceOptions, normalizeQuestion } from './question-types'
 
 export function sortQuestions(questions: AssessmentQuestion[]): AssessmentQuestion[] {
@@ -81,7 +101,7 @@ export function syncAssessmentWithMandatory(
 
 export function newBlankQuestion(sortOrder: number): AssessmentQuestion {
   return normalizeQuestion({
-    id: `q-new-${Date.now()}`,
+    id: crypto.randomUUID(),
     sortOrder,
     isMandatory: false,
     taxonomyPillar: 'Technical Pain Points',

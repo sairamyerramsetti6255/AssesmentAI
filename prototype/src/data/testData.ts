@@ -8,6 +8,12 @@ export interface LeadIntakeFormData {
   industry: string
   domain: string
   country: string
+  clientEmail: string
+  clientPhone: string
+  availableTime: string
+  intakeRemarks: string
+  leadStatus: 'new' | 'contacted' | 'qualified' | 'nurturing' | 'on_hold' | 'unqualified'
+  leadType: 'inbound' | 'outbound' | 'referral' | 'enterprise' | 'mid_market' | 'partner'
   documents: string[]
 }
 
@@ -23,6 +29,12 @@ export const defaultLeadIntakeForm: LeadIntakeFormData = {
   industry: 'Healthcare',
   domain: 'aurorahealth.io',
   country: 'Canada',
+  clientEmail: 'cto@aurorahealth.io',
+  clientPhone: '+1 416 555 0142',
+  availableTime: 'Mon–Fri 9:00–17:00 EST',
+  intakeRemarks: 'Referred by partner — interested in clinical NLP pilot.',
+  leadStatus: 'qualified',
+  leadType: 'enterprise',
   documents: [
     'clinical-data-map-v2.pdf',
     'hipaa-gap-assessment.docx',
@@ -38,6 +50,12 @@ export const leadIntakeFormSamples: LeadIntakeFormData[] = [
     industry: 'Supply Chain',
     domain: 'velocityfreight.de',
     country: 'Germany',
+    clientEmail: 'ops@velocityfreight.de',
+    clientPhone: '+49 30 555 0198',
+    availableTime: 'CET mornings preferred',
+    intakeRemarks: 'Inbound from webinar — fleet optimization focus.',
+    leadStatus: 'contacted',
+    leadType: 'inbound',
     documents: ['fleet-telematics-export.pdf', 'warehouse-sop-2025.docx'],
   },
   {
@@ -45,6 +63,12 @@ export const leadIntakeFormSamples: LeadIntakeFormData[] = [
     industry: 'Retail',
     domain: 'brightlinemedia.co.jp',
     country: 'Japan',
+    clientEmail: 'data@brightlinemedia.co.jp',
+    clientPhone: '+81 3 5555 0100',
+    availableTime: 'JST 10:00–18:00',
+    intakeRemarks: '',
+    leadStatus: 'new',
+    leadType: 'mid_market',
     documents: ['cdp-architecture.pdf', 'personalization-rfp-responses.docx'],
   },
   {
@@ -52,6 +76,12 @@ export const leadIntakeFormSamples: LeadIntakeFormData[] = [
     industry: 'Manufacturing',
     domain: 'copperridge.energy',
     country: 'United States',
+    clientEmail: 'engineering@copperridge.energy',
+    clientPhone: '+1 713 555 0177',
+    availableTime: 'US Central, afternoons',
+    intakeRemarks: 'Predictive maintenance PoC requested.',
+    leadStatus: 'qualified',
+    leadType: 'outbound',
     documents: ['scada-asset-registry.pdf', 'predictive-maintenance-pilot-notes.docx'],
   },
   {
@@ -59,6 +89,12 @@ export const leadIntakeFormSamples: LeadIntakeFormData[] = [
     industry: 'Financial Services',
     domain: 'harborcapital.lu',
     country: 'Luxembourg',
+    clientEmail: 'risk@harborcapital.lu',
+    clientPhone: '+352 555 0123',
+    availableTime: 'EU business hours',
+    intakeRemarks: 'Partner referral — AML monitoring use case.',
+    leadStatus: 'nurturing',
+    leadType: 'referral',
     documents: ['model-risk-management-policy.pdf', 'aml-transaction-monitoring-audit.pdf'],
   },
 ]
@@ -121,7 +157,7 @@ export const clientAssessmentByToken: Record<string, ClientAssessmentFormData> =
   },
 }
 
-/** Partial in-progress responses for leads still in review (no portal yet) */
+/** Partial in-progress responses for leads still in assessment (no portal yet) */
 export const clientAssessmentByLeadId: Record<string, ClientAssessmentFormData> = {
   'lead-1': {
     answers: {

@@ -14,8 +14,8 @@ export function Analytics() {
   return (
     <div>
       <PageHeader
-        title="Operational Analytics Dashboard"
-        description="Module 7 — Global leads ledger, executive remarks audit, and performance visualizations."
+        title="Analytics"
+        description="Global leads ledger, executive remarks audit, and performance visualizations."
       />
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
         <StatCard label="System-wide leads" value={leads.length} />
@@ -50,7 +50,7 @@ export function Analytics() {
                   <td className="py-2 pr-3">{l.country}</td>
                   <td className="py-2 pr-3">{l.assignedExecutive}</td>
                   <td className="py-2 pr-3">
-                    <Badge tone="indigo">{l.funnelStatus}</Badge>
+                    <Badge tone="brand">{l.funnelStatus}</Badge>
                   </td>
                   <td className="py-2 pr-3 text-slate-500">{l.createdAt}</td>
                   <td className="py-2 text-slate-500">{l.lastInteraction}</td>
@@ -94,7 +94,7 @@ export function Analytics() {
                   </div>
                   <div className="h-2 rounded-full bg-slate-100">
                     <div
-                      className="h-2 rounded-full bg-indigo-500"
+                      className="h-2 rounded-full bg-pbs-500"
                       style={{ width: `${(approved / Math.max(exLeads.length, 1)) * 100}%` }}
                     />
                   </div>

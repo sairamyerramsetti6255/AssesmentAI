@@ -1,3 +1,5 @@
+import type { ProposalDocument } from './lib/proposal-document'
+
 export type UserRole = 'super_admin' | 'team_lead' | 'account_executive'
 
 export interface PlatformUser {
@@ -17,6 +19,8 @@ export type ActivityKind =
   | 'user.update'
   | 'user.delete'
   | 'assessment.approve'
+  | 'assessment.delete'
+  | 'assessment.regenerate'
   | 'assessment.link_sent'
   | 'assessment.export'
   | 'client.portal_open'
@@ -48,6 +52,10 @@ export interface MandatoryQuestion {
   type: 'singlechoice' | 'multichoice' | 'scale' | 'text'
   options: string[]
 }
+
+export type LeadStatus = 'new' | 'contacted' | 'qualified' | 'nurturing' | 'on_hold' | 'unqualified'
+
+export type LeadType = 'inbound' | 'outbound' | 'referral' | 'enterprise' | 'mid_market' | 'partner'
 
 export type FunnelStatus =
   | 'intake'
@@ -102,7 +110,7 @@ export interface AssessmentQuestion {
   options?: string[]
   /** Executive-only smart injections — optional extras */
   suggestedOptions?: string[]
-  /** Always included from Admin — cannot be removed in review */
+  /** Always included from Admin — cannot be removed in Assessment Workspace */
   isMandatory?: boolean
 }
 
@@ -127,6 +135,12 @@ export interface Lead {
   domain: string
   country: string
   assignedExecutive: string
+  clientEmail?: string
+  clientPhone?: string
+  availableTime?: string
+  intakeRemarks?: string
+  leadStatus?: LeadStatus
+  leadType?: LeadType
   funnelStatus: FunnelStatus
   createdAt: string
   lastInteraction: string
@@ -135,6 +149,9 @@ export interface Lead {
   assessmentStatus: AssessmentStatus
   portalToken?: string
   clientProgress?: number
+  clientAssessmentStartedAt?: string
+  clientAssessmentSubmittedAt?: string
+  clientAssessmentUpdatedAt?: string
   remarks: string[]
   clientAnswers?: Record<string, string | number | string[]>
   /** Free text when client selects "Other" */
@@ -153,12 +170,15 @@ export interface Lead {
   }
   assessmentTaxonomy?: AssessmentTaxonomy
   proposalUseCases?: UseCase[]
+  proposalSummary?: string
+  proposalNextSteps?: string[]
   proposalArchitecture?: {
     hosting: string
     pipelines: string
     access: string
     security: string
   }
+  proposalDocument?: ProposalDocument
 }
 
 export interface Executive {

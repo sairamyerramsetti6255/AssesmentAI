@@ -1,5 +1,6 @@
 import type { AssessmentQuestion, AssessmentTaxonomy, Lead } from '../types'
-import { pillarToCategory } from './questions'
+import type { ProposalDocument } from './proposal-document'
+import { normalizeAssessmentTaxonomy, pillarToCategory } from './questions'
 import { normalizeQuestion } from './question-types'
 import type { TaxonomyPillar } from '../types'
 import { documentNames } from './documents'
@@ -23,6 +24,8 @@ export interface AssessmentGenerationResult {
 }
 
 export interface ProposalAiResult {
+  summary: string
+  nextSteps: string[]
   useCases: {
     gap: string
     solution: string
@@ -35,6 +38,7 @@ export interface ProposalAiResult {
     access: string
     security: string
   }
+  document: ProposalDocument
 }
 
 const AI_FETCH_TIMEOUT_MS = 300_000
@@ -149,15 +153,18 @@ export async function generateAssessmentQuestions(
     questions: Omit<AssessmentQuestion, 'id'>[]
   }>('/api/assessment/generate-questions', { lead: leadToPayload(lead), research })
 
-  const base = Date.now()
-  const taxonomy: AssessmentTaxonomy = {
-    userDomain: raw.userDomain,
-    technicalPainPoints: raw.taxonomy.technicalPainPoints,
-    operationalPainAreas: raw.taxonomy.operationalPainAreas,
-    processImprovements: raw.taxonomy.processImprovements,
-  }
+  const taxonomy =
+    normalizeAssessmentTaxonomy({
+      userDomain: raw.userDomain,
+      ...raw.taxonomy,
+    }) ?? {
+      userDomain: raw.userDomain ?? '',
+      technicalPainPoints: [],
+      operationalPainAreas: [],
+      processImprovements: [],
+    }
 
-  const questions = raw.questions.map((q, i) =>
+  const questions = (raw.questions ?? []).map((q, i) =>
     mapGeneratedQuestion(
       {
         taxonomyPillar: q.taxonomyPillar,
@@ -169,7 +176,7 @@ export async function generateAssessmentQuestions(
         suggestedOptions: q.suggestedOptions,
         sortOrder: q.sortOrder ?? i,
       },
-      `q-ai-${base}-${i}`,
+      crypto.randomUUID(),
     ),
   )
 

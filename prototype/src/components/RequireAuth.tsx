@@ -8,8 +8,12 @@ export function RequireAuth({
   adminOnly?: boolean
   children?: React.ReactNode
 }) {
-  const { currentUser } = useApp()
+  const { currentUser, loading } = useApp()
   const location = useLocation()
+
+  // On a reload the session is restored asynchronously; redirecting before
+  // that settles would sign the user out on every refresh.
+  if (loading) return null
 
   if (!currentUser) {
     return <Navigate to="/login" state={{ from: location.pathname }} replace />

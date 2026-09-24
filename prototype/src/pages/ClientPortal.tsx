@@ -10,23 +10,31 @@ import type { AssessmentQuestion, Lead, LeadDocument } from '../types'
 import { sortQuestions } from '../lib/questions'
 import { Badge, Button, ProgressBar } from '../components/ui'
 
+function isQuestionAnswered(
+  q: { id: string },
+  state: AnswerState,
+): boolean {
+  const a = state.answers[q.id]
+  const r = state.richtext[q.id]
+  if (r?.trim()) return true
+  return a !== undefined && a !== '' && !(Array.isArray(a) && a.length === 0)
+}
+
 function countAnswered(
   ordered: { id: string; type: string }[],
   state: AnswerState,
 ): number {
-  let n = 0
-  for (const q of ordered) {
-    const a = state.answers[q.id]
-    const r = state.richtext[q.id]
-    if (r?.trim()) {
-      n++
-      continue
-    }
-    if (a !== undefined && a !== '' && !(Array.isArray(a) && a.length === 0)) {
-      n++
-    }
+  return ordered.filter((q) => isQuestionAnswered(q, state)).length
+}
+
+function resumeStep(
+  ordered: AssessmentQuestion[],
+  state: AnswerState,
+): number {
+  for (let i = 0; i < ordered.length; i++) {
+    if (!isQuestionAnswered(ordered[i], state)) return i
   }
-  return n
+  return ordered.length
 }
 
 export function ClientPortal() {
@@ -65,14 +73,37 @@ export function ClientPortal() {
       .then(({ lead, questions }) => {
         setPortalLead(lead)
         setPortalQuestions(questions)
-        if (lead.clientProgress === 100 && lead.clientAnswers) {
-          setSubmitted(true)
-        }
-        if (lead.clientAnswers && Object.keys(lead.clientAnswers).length > 0) {
-          setAnswers({ ...lead.clientAnswers })
+
+        const isSubmitted = Boolean(lead.clientAssessmentSubmittedAt)
+        setSubmitted(isSubmitted)
+
+        const hasSavedAnswers =
+          lead.clientAnswers && Object.keys(lead.clientAnswers).length > 0
+
+        if (isSubmitted && hasSavedAnswers) {
+          setAnswers({ ...lead.clientAnswers! })
           setRichtext({ ...(lead.clientRichtext ?? {}) })
           setOtherText({ ...(lead.clientOtherText ?? {}) })
+        } else if (hasSavedAnswers) {
+          const restoredAnswers = { ...lead.clientAnswers! }
+          const restoredRichtext = { ...(lead.clientRichtext ?? {}) }
+          const restoredOther = { ...(lead.clientOtherText ?? {}) }
+          setAnswers(restoredAnswers)
+          setRichtext(restoredRichtext)
+          setOtherText(restoredOther)
+          const sorted = sortQuestions(questions)
+          setStep(resumeStep(sorted, {
+            answers: restoredAnswers,
+            otherText: restoredOther,
+            richtext: restoredRichtext,
+          }))
+        } else {
+          setAnswers({})
+          setRichtext({})
+          setOtherText({})
+          setStep(0)
         }
+
         setUploadedFiles([...(lead.clientUploadedDocuments ?? [])])
       })
       .catch((e) => setLoadError(e instanceof Error ? e.message : 'Failed to load portal'))
@@ -85,11 +116,16 @@ export function ClientPortal() {
     Math.round((answered / Math.max(orderedQuestions.length, 1)) * 100),
   )
 
-  const persist = async (progress: number) => {
+  const persist = async (progress: number, options?: { submitted?: boolean }) => {
     if (!token || !portalLead) return
-    const extras = { otherText, uploadedDocuments: uploadedFiles }
+    const extras = {
+      otherText,
+      uploadedDocuments: uploadedFiles,
+      submitted: options?.submitted === true,
+    }
     if (onBehalf && currentUser) {
-      await saveClientResponses(portalLead.id, answers, richtext, progress, extras)
+      const raw = await saveClientResponses(portalLead.id, answers, richtext, progress, extras)
+      setPortalLead(api.dbToLead(raw as unknown as api.DbLead))
     } else {
       const updated = await api.savePortalResponses(token, answers, richtext, progress, extras)
       setPortalLead(updated)
@@ -110,8 +146,13 @@ export function ClientPortal() {
     setTimeout(() => setSaved(false), 2000)
   }
 
+  const navigationProgress = (nextStep: number) => {
+    const totalSteps = orderedQuestions.length + 1
+    return Math.min(99, Math.round((nextStep / totalSteps) * 100))
+  }
+
   const handleSubmit = async () => {
-    await persist(100)
+    await persist(100, { submitted: true })
     if (onBehalf) {
       void logActivity('client.on_behalf_fill', `Assessment submitted on behalf — ${portalLead?.companyName}`, {
         leadId: portalLead?.id,
@@ -211,10 +252,8 @@ export function ClientPortal() {
         </div>
       )}
       <div className="mb-6 text-center">
-        <p className="text-xs font-semibold uppercase tracking-widest text-indigo-600">
-          Secure client assessment
-        </p>
-        <h1 className="mt-2 text-2xl font-bold text-slate-900">{portalLead.companyName}</h1>
+        <p className="text-sm font-medium text-pbs-700">Client assessment</p>
+        <h1 className="mt-1 text-2xl font-semibold text-pbs-900">{portalLead.companyName}</h1>
         <p
           className={`mt-2 min-h-[1.25rem] text-xs font-medium text-emerald-600 ${
             saved ? 'opacity-100' : 'opacity-0'
@@ -242,7 +281,7 @@ export function ClientPortal() {
             <div className="shrink-0 min-h-[7.5rem] border-b border-slate-100 pb-4">
               <div className="flex flex-wrap gap-2">
                 {current.isMandatory && <Badge tone="amber">Mandatory</Badge>}
-                <span className="inline-block rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-medium text-indigo-700">
+                <span className="inline-block rounded-full bg-pbs-50 px-2.5 py-0.5 text-xs font-medium text-pbs-700">
                   {current.taxonomyPillar}
                 </span>
               </div>
@@ -250,7 +289,7 @@ export function ClientPortal() {
                 {current.text}
               </h2>
               <p className="mt-2 text-xs text-slate-500">
-                Select the best option(s). Choose <strong className="text-indigo-600">Other</strong>{' '}
+                Select the best option(s). Choose <strong className="text-pbs-600">Other</strong>{' '}
                 to type your own answer.
               </p>
             </div>
@@ -285,7 +324,7 @@ export function ClientPortal() {
                 className="flex h-48 flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 p-6 text-center"
               >
                 <p className="text-sm text-slate-600">Drag files here or use the button below</p>
-                <label className="mt-4 inline-block cursor-pointer rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500">
+                <label className="mt-4 inline-block cursor-pointer rounded-lg bg-pbs-600 px-4 py-2 text-sm font-medium text-white hover:bg-pbs-500">
                   Choose files
                   <input
                     type="file"
@@ -300,7 +339,7 @@ export function ClientPortal() {
                 </label>
               </div>
               {uploading && (
-                <p className="mt-4 text-sm text-indigo-600">Uploading documents…</p>
+                <p className="mt-4 text-sm text-pbs-600">Uploading documents…</p>
               )}
               {uploadedFiles.length > 0 && (
                 <div className="mt-4">
@@ -321,8 +360,9 @@ export function ClientPortal() {
           variant="secondary"
           disabled={step === 0}
           onClick={() => {
-            void persist(pct)
-            setStep((s) => Math.max(0, s - 1))
+            const prev = Math.max(0, step - 1)
+            void persist(navigationProgress(prev))
+            setStep(prev)
           }}
         >
           Back
@@ -330,12 +370,10 @@ export function ClientPortal() {
         {!isDocStep ? (
           <Button
             onClick={() => {
-              void persist(Math.round(((step + 1) / orderedQuestions.length) * 100))
-              if (step < orderedQuestions.length - 1) {
-                setStep((s) => s + 1)
-              } else {
-                setStep(orderedQuestions.length)
-              }
+              const next =
+                step < orderedQuestions.length - 1 ? step + 1 : orderedQuestions.length
+              void persist(navigationProgress(next))
+              setStep(next)
             }}
           >
             {step < orderedQuestions.length - 1 ? 'Next' : 'Continue to uploads'}

@@ -93,7 +93,7 @@ export function Reports() {
                   <tr key={u.id} className="border-b border-slate-50">
                     <td className="py-2 pr-3 font-medium">{u.name}</td>
                     <td className="py-2 pr-3">
-                      <Badge tone="indigo">{u.role.replace('_', ' ')}</Badge>
+                      <Badge tone="brand">{u.role.replace('_', ' ')}</Badge>
                     </td>
                     <td className="py-2 text-xs text-slate-500">
                       {u.lastLogin ? new Date(u.lastLogin).toLocaleString() : '—'}
@@ -159,7 +159,7 @@ export function Reports() {
                     <p className="text-xs text-slate-500">{new Date(e.at).toLocaleString()}</p>
                     <p className="font-medium text-slate-800">{e.summary}</p>
                     {e.companyName && (
-                      <p className="text-xs text-indigo-600">{e.companyName}</p>
+                      <p className="text-xs text-pbs-600">{e.companyName}</p>
                     )}
                   </li>
                 ))

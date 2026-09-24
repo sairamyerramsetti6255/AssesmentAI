@@ -26,7 +26,7 @@ export function ClientPortalThankYou({ companyName, onBehalf, executiveName }: P
       <p className="mt-4 text-sm text-slate-500">
         {onBehalf
           ? `Recorded on behalf of the client by ${executiveName ?? 'your account executive'}. The client may receive a confirmation from your team.`
-          : 'Our team will review your responses and supporting documents. You may close this window — your account executive will follow up with next steps.'}
+          : 'Our team will assess your responses and supporting documents. You may close this window — your account executive will follow up with next steps.'}
       </p>
       <p className="mt-8 text-xs text-slate-400">Submission recorded · Assessment complete</p>
     </div>
