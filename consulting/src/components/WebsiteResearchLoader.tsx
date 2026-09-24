@@ -53,9 +53,6 @@ export function WebsiteResearchLoader({ status, active }: Props) {
             {done ? 'Research complete' : 'Researching your company'}
           </p>
           <p className="mt-1 text-pbs-800">{status.message}</p>
-          {status.engine === 'playwright' && !done && (
-            <p className="mt-1 text-xs text-pbs-600">Using a full browser to read JavaScript-heavy pages.</p>
-          )}
         </div>
       </div>
 

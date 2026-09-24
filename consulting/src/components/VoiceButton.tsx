@@ -83,7 +83,7 @@ export function VoiceButton({
     stopBrowser()
     setListening(false)
     setProcessing(true)
-    setHint('Transcribing with Sarvam Saaras…')
+    setHint('Turning your voice into text…')
     try {
       const blob = await recordingRef.current?.stop()
       recordingRef.current = null
@@ -100,16 +100,15 @@ export function VoiceButton({
         setHint('')
         return
       }
-      setHint('Could not transcribe audio. Try again or type your answer.')
-      startBrowser()
+      setHint('We could not catch that. Please speak again or type your answer.')
     } catch {
       if (browserDraftRef.current.trim()) {
         onFinal(browserDraftRef.current.trim())
         setHint('')
       } else if (startBrowser()) {
-        setHint('Sarvam scribe unavailable — using browser voice. Speak again.')
+        setHint('Speak again, or type your answer.')
       } else {
-        setHint('Allow microphone access or type your answer.')
+        setHint('Allow the microphone, or type your answer.')
       }
     } finally {
       setProcessing(false)
@@ -127,7 +126,7 @@ export function VoiceButton({
     }
     setBackend('sarvam')
     setListening(true)
-    setHint('Recording — speak now. We transcribe with Sarvam Saaras when you stop.')
+    setHint('Listening. Speak now, then tap stop.')
 
     if (voiceSupported()) {
       stopBrowserRef.current = startListening(
@@ -184,13 +183,7 @@ export function VoiceButton({
 
   useEffect(() => () => stopAll(), [])
 
-  const label = processing
-    ? 'Transcribing…'
-    : listening
-      ? 'Stop voice'
-      : backend === 'sarvam'
-        ? 'Answer by voice (Sarvam Saaras)'
-        : 'Answer by voice'
+  const label = processing ? 'Transcribing…' : listening ? 'Stop voice' : 'Answer by voice'
 
   return (
     <div className="flex flex-col items-start gap-2">

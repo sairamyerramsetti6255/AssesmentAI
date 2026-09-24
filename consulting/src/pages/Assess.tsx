@@ -13,7 +13,7 @@ import {
 } from '../lib/api.ts'
 import { CLIENT_VOICE_INTRO_ID, createIntroQuestion } from '../lib/introQuestion.ts'
 
-type Phase = 'details' | 'questions' | 'done'
+type Phase = 'details' | 'story' | 'preparing' | 'questions' | 'done'
 
 interface FormState {
   companyName: string
@@ -86,16 +86,6 @@ export function Assess() {
   const [otherText, setOtherText] = useState<Record<string, string>>({})
   const [emailNote, setEmailNote] = useState('')
   const current = questions[step]
-
-  const applyIntroSummary = (summary: string) => {
-    const text = summary.trim()
-    if (!text) return
-    setAnswers((prev) => {
-      const existing = String(prev[CLIENT_VOICE_INTRO_ID] ?? '').trim()
-      if (existing) return prev
-      return { ...prev, [CLIENT_VOICE_INTRO_ID]: text }
-    })
-  }
   const progress = useMemo(() => {
     if (!questions.length) return 0
     return Math.round(((step + 1) / questions.length) * 100)
@@ -127,7 +117,6 @@ export function Assess() {
           currentPath: status.currentPath,
           engine: status.engine,
         })
-        if (status.introSummary) applyIntroSummary(status.introSummary)
         if (status.done) setResearchActive(false)
       } catch {
         /* keep polling */
@@ -149,41 +138,9 @@ export function Assess() {
       setStep(0)
       setAnswers({})
       setOtherText({})
-      setPhase('questions')
-
-      const website = form.domain.trim()
-      if (website) {
-        setResearchActive(true)
-        setResearchStatus({
-          progress: 5,
-          done: false,
-          message: 'Starting website research…',
-          phase: 'crawl',
-          pagesCrawled: 0,
-          maxPages: 6,
-        })
-        void runCompanyResearch(created.token)
-          .then((result) => {
-            if (result.introSummary) applyIntroSummary(result.introSummary)
-            void fetchResearchStatus(created.token).then((status) => {
-              if (status.introSummary) applyIntroSummary(status.introSummary)
-              setResearchStatus({
-                progress: status.progress,
-                done: true,
-                message: status.message,
-                phase: 'done',
-                pagesCrawled: status.pagesCrawled,
-                maxPages: status.maxPages,
-                engine: status.engine,
-              })
-              setResearchActive(false)
-            })
-          })
-          .catch(() => setResearchActive(false))
-      } else {
-        setResearchActive(false)
-        setResearchStatus(null)
-      }
+      setResearchActive(false)
+      setResearchStatus(null)
+      setPhase('story')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not start the assessment')
     } finally {
@@ -191,12 +148,31 @@ export function Assess() {
     }
   }
 
-  const loadTailQuestions = async (introAnswer: string) => {
+  const prepareQuestions = async (introAnswer: string) => {
+    setPhase('preparing')
+    setResearchActive(true)
+    setResearchStatus({
+      progress: 8,
+      done: false,
+      message: form.domain.trim()
+        ? 'Reading your website and preparing questions from what you told us…'
+        : 'Preparing questions from what you told us…',
+      phase: 'crawl',
+      pagesCrawled: 0,
+      maxPages: 6,
+    })
+    if (form.domain.trim()) {
+      await runCompanyResearch(token)
+    }
     const generated = await generateQuestions(token, introAnswer)
-    setQuestions(generated.questions)
+    const rest = generated.questions.filter((question) => question.id !== CLIENT_VOICE_INTRO_ID)
+    setQuestions(rest.length ? rest : generated.questions)
     setWarning(generated.warning ?? '')
     setTailLoaded(true)
-    setStep(1)
+    setStep(0)
+    setResearchActive(false)
+    setResearchStatus(null)
+    setPhase('questions')
   }
 
   const applyVoice = (spoken: string) => {
@@ -276,13 +252,13 @@ export function Assess() {
     setError('')
     setBusy(true)
     try {
-      if (!tailLoaded && current.id === CLIENT_VOICE_INTRO_ID) {
+      if (phase === 'story') {
         const introAnswer = String(answers[CLIENT_VOICE_INTRO_ID] ?? '').trim()
         if (introAnswer.length < 15) {
-          setError('Speak or type a little more about your business, activities, and goals.')
+          setError('Speak or type a little more about yourself and your business.')
           return
         }
-        await loadTailQuestions(introAnswer)
+        await prepareQuestions(introAnswer)
         return
       }
 
@@ -348,27 +324,37 @@ export function Assess() {
           </form>
         )}
 
-        {phase === 'questions' && current && (
+        {phase === 'preparing' && (
           <div className="space-y-5">
+            <WebsiteResearchLoader
+              status={
+                researchStatus ?? {
+                  progress: 10,
+                  done: false,
+                  message: 'Reading your website and preparing your questions…',
+                  phase: 'crawl',
+                }
+              }
+              active
+            />
+            <p className="text-sm text-pbs-700">
+              This uses your spoken answer together with your website. The questions come next.
+            </p>
+          </div>
+        )}
+
+        {(phase === 'story' || phase === 'questions') && current && (
+          <div className="space-y-5">
+            {phase === 'questions' && (
             <div>
               <div className="mb-2 flex items-center justify-between text-sm text-pbs-700">
-                <span>
-                  Question {step + 1}
-                  {tailLoaded ? ` of ${questions.length}` : ''}
-                </span>
+                <span>Question {step + 1} of {questions.length}</span>
                 <span>{progress}%</span>
               </div>
               <div className="h-1.5 overflow-hidden rounded-full bg-pbs-100">
                 <div className="h-full bg-pbs-600" style={{ width: `${Math.max(progress, 8)}%` }} />
               </div>
             </div>
-            {isIntroStep && (researchActive || (researchStatus && !researchStatus.done)) && (
-              <WebsiteResearchLoader status={researchStatus} active={researchActive || Boolean(researchStatus && researchStatus.progress < 100)} />
-            )}
-            {isIntroStep && researchStatus?.done && !researchActive && (
-              <p className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-                Website research is complete. Finish your voice answer, then continue.
-              </p>
             )}
             {warning && <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">{warning}</p>}
             <div className="rounded-3xl border border-pbs-line bg-white p-6">
@@ -404,8 +390,8 @@ export function Assess() {
                   }}
                 />
                 <p className="mt-2 text-sm text-pbs-600">
-                  {isIntroStep
-                    ? 'Listening is on by default. Speak about your business, activities, and what you want to improve.'
+                  {phase === 'story'
+                    ? 'Listening is on. Speak about yourself and your business, then tap stop.'
                     : normalizeType(current.type) === 'multichoice'
                       ? 'Say several options (e.g. “A and B”). You can also tap to select.'
                       : 'Speak an option or a longer answer. You can still edit it.'}
@@ -416,10 +402,10 @@ export function Assess() {
             <div className="flex gap-3">
               <button
                 type="button"
-                disabled={(tailLoaded ? step === 0 : true) || busy}
+                disabled={(phase === 'story' ? false : step === 0) || busy}
                 onClick={() => {
                   setError('')
-                  if (!tailLoaded) {
+                  if (phase === 'story') {
                     setPhase('details')
                     return
                   }
@@ -436,10 +422,10 @@ export function Assess() {
                 className="rounded-full bg-pbs-600 px-6 py-3 font-semibold text-white disabled:opacity-50"
               >
                 {busy
-                  ? isIntroStep && !tailLoaded
+                  ? phase === 'story'
                     ? 'Preparing your questions…'
                     : 'Saving…'
-                  : isIntroStep && !tailLoaded
+                  : phase === 'story'
                     ? 'Continue'
                     : step === questions.length - 1
                       ? 'Submit'
