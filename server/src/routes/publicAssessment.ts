@@ -22,6 +22,7 @@ import {
 import { notifyAssessmentReceived } from '../lib/zeptomail.js';
 import { checkSarvamHealth, transcribeWithSarvam } from '../lib/sarvam.js';
 import { mergeCrawlStatus, parseCrawlStatus, researchMessage } from '../lib/researchStatus.js';
+import { buildClientIntroSummary } from '../lib/researchSummary.js';
 import { scrapeWebsite } from '../lib/openrouter/scrape.js';
 
 const router = Router();
@@ -188,6 +189,9 @@ router.get('/assessment/research/:token/status', async (req: Request, res: Respo
     const progress = Number(lead.research_progress ?? 0);
     const status = parseCrawlStatus(lead.ai_research);
     const done = progress >= 100;
+    const research = parseStoredResearch(lead.ai_research);
+    const introSummary = research && done ? buildClientIntroSummary(research) : '';
+
     res.json({
       progress,
       done,
@@ -198,6 +202,7 @@ router.get('/assessment/research/:token/status', async (req: Request, res: Respo
       maxPages: status?.maxPages ?? 6,
       currentPath: status?.currentPath,
       engine: status?.engine,
+      introSummary,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Could not load research status';
@@ -219,7 +224,7 @@ router.post('/assessment/research', async (req: Request, res: Response) => {
 
     const cached = parseStoredResearch(lead.ai_research);
     if (cached && Number(lead.research_progress) >= 100) {
-      return res.json({ research: cached, cached: true });
+      return res.json({ research: cached, cached: true, introSummary: buildClientIntroSummary(cached) });
     }
 
     const domain = String(lead.domain ?? '').trim();
@@ -309,7 +314,7 @@ router.post('/assessment/research', async (req: Request, res: Response) => {
       })
       .eq('id', lead.id);
 
-    res.json({ research, cached: false });
+    res.json({ research, cached: false, introSummary: buildClientIntroSummary(research) });
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Research failed';
     console.error('[public/research]', e);

@@ -72,11 +72,14 @@ export function fetchResearchStatus(token: string) {
     maxPages: number
     currentPath?: string
     engine?: string
+    introSummary?: string
   }>(`/api/public/assessment/research/${token}/status`)
 }
 
 export function runCompanyResearch(token: string) {
-  return request<{ research: Record<string, unknown>; cached?: boolean }>('/api/public/assessment/research', {
+  return request<{ research: Record<string, unknown>; cached?: boolean; introSummary?: string }>(
+    '/api/public/assessment/research',
+    {
     method: 'POST',
     body: JSON.stringify({ token }),
   })

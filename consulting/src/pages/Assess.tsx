@@ -85,8 +85,17 @@ export function Assess() {
   const [answers, setAnswers] = useState<Record<string, string | number | string[]>>({})
   const [otherText, setOtherText] = useState<Record<string, string>>({})
   const [emailNote, setEmailNote] = useState('')
-
   const current = questions[step]
+
+  const applyIntroSummary = (summary: string) => {
+    const text = summary.trim()
+    if (!text) return
+    setAnswers((prev) => {
+      const existing = String(prev[CLIENT_VOICE_INTRO_ID] ?? '').trim()
+      if (existing) return prev
+      return { ...prev, [CLIENT_VOICE_INTRO_ID]: text }
+    })
+  }
   const progress = useMemo(() => {
     if (!questions.length) return 0
     return Math.round(((step + 1) / questions.length) * 100)
@@ -118,6 +127,7 @@ export function Assess() {
           currentPath: status.currentPath,
           engine: status.engine,
         })
+        if (status.introSummary) applyIntroSummary(status.introSummary)
         if (status.done) setResearchActive(false)
       } catch {
         /* keep polling */
@@ -153,8 +163,10 @@ export function Assess() {
           maxPages: 6,
         })
         void runCompanyResearch(created.token)
-          .then(() => {
+          .then((result) => {
+            if (result.introSummary) applyIntroSummary(result.introSummary)
             void fetchResearchStatus(created.token).then((status) => {
+              if (status.introSummary) applyIntroSummary(status.introSummary)
               setResearchStatus({
                 progress: status.progress,
                 done: true,

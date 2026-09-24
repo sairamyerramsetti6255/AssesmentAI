@@ -15,11 +15,7 @@ export interface SarvamConfig {
 }
 
 export function getSarvamConfigFromEnv(): SarvamConfig | null {
-  const keys = [
-    process.env.SARVAM_API_KEY,
-    process.env.SARVAM_API_SUBSCRIPTION_KEY,
-    process.env.SARVAM_SAMVAAD_API_KEY,
-  ]
+  const keys = [process.env.SARVAM_API_KEY, process.env.SARVAM_API_SUBSCRIPTION_KEY]
     .map((value) => value?.trim())
     .filter((value): value is string => Boolean(value))
     .filter((value, index, all) => all.indexOf(value) === index);
@@ -173,7 +169,7 @@ export async function transcribeWithSarvam(
   for (const apiKey of config.apiKeys) {
     const form = new FormData();
     form.append('file', new Blob([audio], { type: mimeType || 'audio/webm' }), `audio.${ext}`);
-    form.append('language_code', languageCode);
+    form.append('language_code', languageCode === 'auto' ? 'unknown' : languageCode);
     form.append('model', 'saaras:v3');
     form.append('mode', 'transcribe');
 

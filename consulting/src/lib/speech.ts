@@ -23,6 +23,10 @@ export function voiceSupported(): boolean {
   return recognitionCtor() !== null
 }
 
+export function microphoneSupported(): boolean {
+  return Boolean(typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia)
+}
+
 export function startListening(onText: (text: string, final: boolean) => void, onEnd: () => void): () => void {
   const Ctor = recognitionCtor()
   if (!Ctor) {
@@ -53,47 +57,61 @@ export function startListening(onText: (text: string, final: boolean) => void, o
   }
 }
 
-/** Record from microphone until stop(); returns webm/opus blob when supported. */
-export function startRecording(onEnd: () => void): () => Promise<Blob | null> {
+export interface RecordingSession {
+  ready: Promise<boolean>
+  stop: () => Promise<Blob | null>
+}
+
+/** Record from microphone until stop(); waits for mic before recording. */
+export function startRecording(): RecordingSession {
+  const chunks: Blob[] = []
   let stream: MediaStream | null = null
   let recorder: MediaRecorder | null = null
-  const chunks: Blob[] = []
 
-  const stopAndGetBlob = (): Promise<Blob | null> =>
-    new Promise((resolve) => {
-      if (!recorder || recorder.state === 'inactive') {
-        stream?.getTracks().forEach((track) => track.stop())
-        resolve(chunks.length ? new Blob(chunks, { type: recorder?.mimeType || 'audio/webm' }) : null)
-        return
-      }
-      const active = recorder
-      recorder.onstop = () => {
-        stream?.getTracks().forEach((track) => track.stop())
-        resolve(chunks.length ? new Blob(chunks, { type: active.mimeType || 'audio/webm' }) : null)
-        onEnd()
-      }
-      recorder.stop()
-    })
-
-  void navigator.mediaDevices
-    .getUserMedia({ audio: true })
-    .then((media) => {
-      stream = media
+  const ready = (async () => {
+    if (!microphoneSupported()) return false
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus'
-        : 'audio/webm'
-      recorder = new MediaRecorder(media, { mimeType: mime })
+        : MediaRecorder.isTypeSupported('audio/mp4')
+          ? 'audio/mp4'
+          : 'audio/webm'
+      recorder = new MediaRecorder(stream, { mimeType: mime })
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) chunks.push(event.data)
       }
-      recorder.start(250)
-    })
-    .catch(() => onEnd())
+      recorder.start(300)
+      return true
+    } catch {
+      return false
+    }
+  })()
 
-  return stopAndGetBlob
+  const stop = async (): Promise<Blob | null> => {
+    const ok = await ready
+    if (!ok || !recorder) {
+      stream?.getTracks().forEach((track) => track.stop())
+      return null
+    }
+    if (recorder.state === 'inactive') {
+      stream?.getTracks().forEach((track) => track.stop())
+      return chunks.length ? new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }) : null
+    }
+    return new Promise((resolve) => {
+      const active = recorder!
+      active.onstop = () => {
+        stream?.getTracks().forEach((track) => track.stop())
+        resolve(chunks.length ? new Blob(chunks, { type: active.mimeType || 'audio/webm' }) : null)
+      }
+      active.stop()
+    })
+  }
+
+  return { ready, stop }
 }
 
 export async function transcribeBlobWithSarvam(blob: Blob): Promise<string> {
-  const result = await transcribeAudioBlob(blob, 'en-IN')
+  const result = await transcribeAudioBlob(blob, 'unknown')
   return result.transcript
 }

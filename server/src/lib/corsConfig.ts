@@ -1,6 +1,7 @@
 /** Origins always allowed in production (extend via CLIENT_URL / CORS_ORIGINS) */
 const BUILTIN_ORIGINS = [
   'https://assessment.pbshope.in',
+  'https://consulting.pbshope.in',
   'https://assessment.graylogic.cloud',
   'http://localhost:5173',
   'http://localhost:3000',

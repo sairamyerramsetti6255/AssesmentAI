@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { fetchSarvamHealth } from '../lib/api.ts'
-import { startListening, startRecording, transcribeBlobWithSarvam, voiceSupported } from '../lib/speech.ts'
+import {
+  microphoneSupported,
+  startListening,
+  startRecording,
+  transcribeBlobWithSarvam,
+  voiceSupported,
+  type RecordingSession,
+} from '../lib/speech.ts'
 
 interface Props {
   onFinal: (text: string) => void
@@ -8,19 +14,8 @@ interface Props {
   autoStart?: boolean
   listenKey?: string
   maxListenMs?: number
-}
-
-let sarvamScribeOk: boolean | null = null
-
-async function sarvamScribeAvailable(): Promise<boolean> {
-  if (sarvamScribeOk !== null) return sarvamScribeOk
-  try {
-    const health = await fetchSarvamHealth()
-    sarvamScribeOk = health.speechToText.ok
-  } catch {
-    sarvamScribeOk = false
-  }
-  return sarvamScribeOk
+  /** Prefer Saaras v3 server scribe (MediaRecorder → API). */
+  preferSarvam?: boolean
 }
 
 export function VoiceButton({
@@ -29,19 +24,17 @@ export function VoiceButton({
   autoStart = false,
   listenKey,
   maxListenMs,
+  preferSarvam = true,
 }: Props) {
   const [listening, setListening] = useState(false)
   const [processing, setProcessing] = useState(false)
-  const [unsupported, setUnsupported] = useState(false)
-  const [backend, setBackend] = useState<'browser' | 'sarvam' | 'pending'>('pending')
-  const stopRef = useRef<(() => void) | null>(null)
-  const stopRecordRef = useRef<(() => Promise<Blob | null>) | null>(null)
+  const [hint, setHint] = useState('')
+  const [backend, setBackend] = useState<'sarvam' | 'browser' | 'idle'>('idle')
+  const stopBrowserRef = useRef<(() => void) | null>(null)
+  const recordingRef = useRef<RecordingSession | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastListenKey = useRef<string | null>(null)
-
-  useEffect(() => {
-    void sarvamScribeAvailable().then((ok) => setBackend(ok ? 'sarvam' : 'browser'))
-  }, [])
+  const browserDraftRef = useRef('')
 
   const clearTimer = () => {
     if (timerRef.current) {
@@ -50,99 +43,153 @@ export function VoiceButton({
     }
   }
 
-  const stop = () => {
+  const stopBrowser = () => {
+    stopBrowserRef.current?.()
+    stopBrowserRef.current = null
+  }
+
+  const stopAll = () => {
     clearTimer()
-    stopRef.current?.()
-    stopRef.current = null
+    stopBrowser()
     setListening(false)
   }
 
+  const startBrowser = () => {
+    if (!voiceSupported()) return false
+    setBackend('browser')
+    setHint('')
+    stopBrowser()
+    setListening(true)
+    browserDraftRef.current = ''
+    stopBrowserRef.current = startListening(
+      (text, final) => {
+        if (final) {
+          browserDraftRef.current = browserDraftRef.current
+            ? `${browserDraftRef.current} ${text}`
+            : text
+          onFinal(text)
+        } else onInterim?.(text)
+      },
+      () => setListening(false),
+    )
+    if (maxListenMs && maxListenMs > 0) {
+      timerRef.current = setTimeout(() => stopAll(), maxListenMs)
+    }
+    return true
+  }
+
   const finishSarvamRecording = async () => {
+    clearTimer()
+    stopBrowser()
     setListening(false)
     setProcessing(true)
+    setHint('Transcribing with Sarvam Saaras…')
     try {
-      const blob = await stopRecordRef.current?.()
-      stopRecordRef.current = null
-      if (blob && blob.size > 0) {
+      const blob = await recordingRef.current?.stop()
+      recordingRef.current = null
+      if (blob && blob.size > 800) {
         const text = await transcribeBlobWithSarvam(blob)
-        if (text) onFinal(text)
+        if (text.trim()) {
+          onFinal(text)
+          setHint('')
+          return
+        }
       }
+      if (browserDraftRef.current.trim()) {
+        onFinal(browserDraftRef.current.trim())
+        setHint('')
+        return
+      }
+      setHint('Could not transcribe audio. Try again or type your answer.')
+      startBrowser()
     } catch {
-      setUnsupported(true)
+      if (browserDraftRef.current.trim()) {
+        onFinal(browserDraftRef.current.trim())
+        setHint('')
+      } else if (startBrowser()) {
+        setHint('Sarvam scribe unavailable — using browser voice. Speak again.')
+      } else {
+        setHint('Allow microphone access or type your answer.')
+      }
     } finally {
       setProcessing(false)
     }
   }
 
-  const start = async () => {
-    const useSarvam = backend === 'sarvam' || (backend === 'pending' && await sarvamScribeAvailable())
-    setBackend(useSarvam ? 'sarvam' : 'browser')
-
-    if (useSarvam) {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        setUnsupported(true)
-        return
-      }
-      setUnsupported(false)
-      stop()
-      setListening(true)
-      stopRecordRef.current = startRecording(() => setListening(false))
-      if (maxListenMs && maxListenMs > 0) {
-        timerRef.current = setTimeout(() => void finishSarvamRecording(), maxListenMs)
-      }
-      return
+  const startSarvam = async (): Promise<boolean> => {
+    if (!microphoneSupported()) return false
+    const session = startRecording()
+    recordingRef.current = session
+    const ok = await session.ready
+    if (!ok) {
+      recordingRef.current = null
+      return false
     }
-
-    if (!voiceSupported()) {
-      setUnsupported(true)
-      return
-    }
-    setUnsupported(false)
-    stop()
+    setBackend('sarvam')
     setListening(true)
-    stopRef.current = startListening(
-      (text, final) => {
-        if (final) onFinal(text)
-        else onInterim?.(text)
-      },
-      () => stop(),
-    )
-    if (maxListenMs && maxListenMs > 0) {
-      timerRef.current = setTimeout(() => stop(), maxListenMs)
+    setHint('Recording — speak now. We transcribe with Sarvam Saaras when you stop.')
+
+    if (voiceSupported()) {
+      stopBrowserRef.current = startListening(
+        (text, final) => {
+          if (final) {
+            browserDraftRef.current = browserDraftRef.current
+              ? `${browserDraftRef.current} ${text}`
+              : text
+          }
+          onInterim?.(text)
+        },
+        () => {},
+      )
     }
+
+    if (maxListenMs && maxListenMs > 0) {
+      timerRef.current = setTimeout(() => void finishSarvamRecording(), maxListenMs)
+    }
+    return true
+  }
+
+  const start = async () => {
+    setHint('')
+    if (preferSarvam && microphoneSupported()) {
+      const ok = await startSarvam()
+      if (ok) return
+    }
+    if (startBrowser()) return
+    setHint('Voice is not available. Type your answer instead.')
   }
 
   const toggle = () => {
     if (processing) return
     if (listening) {
       if (backend === 'sarvam') void finishSarvamRecording()
-      else stop()
+      else stopAll()
       return
     }
     void start()
   }
 
   useEffect(() => {
-    if (!autoStart || backend === 'pending') return
+    if (!autoStart) return
     const key = listenKey ?? 'default'
     if (lastListenKey.current === key) return
     lastListenKey.current = key
     void start()
     return () => {
-      stop()
-      stopRecordRef.current = null
+      stopAll()
+      recordingRef.current = null
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- start tied to listenKey/backend
-  }, [autoStart, listenKey, backend])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, listenKey])
 
-  useEffect(() => () => stop(), [])
+  useEffect(() => () => stopAll(), [])
 
   const label = processing
     ? 'Transcribing…'
     : listening
       ? 'Stop voice'
       : backend === 'sarvam'
-        ? 'Answer by voice (Sarvam)'
+        ? 'Answer by voice (Sarvam Saaras)'
         : 'Answer by voice'
 
   return (
@@ -150,7 +197,7 @@ export function VoiceButton({
       <button
         type="button"
         onClick={toggle}
-        disabled={processing || backend === 'pending'}
+        disabled={processing}
         className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-white disabled:opacity-60 ${
           listening ? 'bg-red-600' : 'bg-pbs-600 hover:bg-pbs-700'
         }`}
@@ -159,13 +206,9 @@ export function VoiceButton({
         {label}
       </button>
       {listening && maxListenMs ? (
-        <p className="text-sm text-pbs-600">Listening — speak for up to about a minute. Tap stop when you are done.</p>
-      ) : listening ? (
-        <p className="text-sm text-pbs-600">Listening…</p>
+        <p className="text-sm text-pbs-600">Up to about a minute. Tap stop when you are done.</p>
       ) : null}
-      {unsupported && (
-        <p className="text-sm text-pbs-700">Voice is not available in this browser. Type your answer instead.</p>
-      )}
+      {hint && <p className="text-sm text-pbs-700">{hint}</p>}
     </div>
   )
 }
