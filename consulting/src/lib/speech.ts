@@ -35,7 +35,7 @@ export function startLiveVoice(
   }
   let stopped = false
   const recognition = new Ctor()
-  recognition.lang = 'en-IN'
+  recognition.lang = 'en-US'
   recognition.continuous = true
   recognition.interimResults = true
   recognition.onresult = (event) => {

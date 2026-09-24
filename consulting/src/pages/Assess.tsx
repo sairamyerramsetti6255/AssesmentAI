@@ -12,7 +12,7 @@ import {
   saveAnswers,
   type PublicQuestion,
 } from '../lib/api.ts'
-import { CLIENT_VOICE_INTRO_ID, createIntroQuestion } from '../lib/introQuestion.ts'
+import { CLIENT_VOICE_INTRO_ID, CLIENT_VOICE_INTRO_TEXT, createIntroQuestion } from '../lib/introQuestion.ts'
 
 type Phase = 'details' | 'story' | 'preparing' | 'questions' | 'done'
 
@@ -73,7 +73,6 @@ function matchOptions(options: string[], spoken: string): string[] {
 export function Assess() {
   const [phase, setPhase] = useState<Phase>('details')
   const [form, setForm] = useState<FormState>(EMPTY)
-  const [interim, setInterim] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [token, setToken] = useState('')
@@ -87,6 +86,7 @@ export function Assess() {
   const [emailNote, setEmailNote] = useState('')
   const current = questions[step]
   const spokenRef = useRef<Record<string, string>>({})
+  const voiceLock = useRef(false)
   const progress = useMemo(() => {
     if (!questions.length) return 0
     return Math.round(((step + 1) / questions.length) * 100)
@@ -170,7 +170,9 @@ export function Assess() {
       phase: 'brief',
     })
     const generated = await generateQuestions(token, introAnswer)
-    const rest = generated.questions.filter((question) => question.id !== CLIENT_VOICE_INTRO_ID)
+    const rest = generated.questions.filter(
+      (question) => question.id !== CLIENT_VOICE_INTRO_ID && question.text !== CLIENT_VOICE_INTRO_TEXT,
+    )
     if (!rest.length) {
       throw new Error('Questions were not created. Please try again.')
     }
@@ -214,9 +216,8 @@ export function Assess() {
       }
     }
     if (type === 'text') {
-      const next = appendText(spokenRef.current[current.id] ?? String(answers[current.id] ?? ''), spoken)
-      spokenRef.current[current.id] = next
-      setAnswers((prev) => ({ ...prev, [current.id]: next }))
+      if (voiceLock.current) return
+      spokenRef.current[current.id] = appendText(spokenRef.current[current.id] ?? '', spoken)
       return
     }
     setOtherText((prev) => ({ ...prev, [current.id]: appendText(prev[current.id] ?? '', spoken) }))
@@ -392,14 +393,9 @@ export function Assess() {
               <div className="mt-6">
                 <QuestionControl
                   question={current}
-                  value={
-                    normalizeType(current.type) === 'text'
-                      ? appendText(typeof answers[current.id] === 'string' ? (answers[current.id] as string) : '', interim)
-                      : answers[current.id]
-                  }
+                  value={answers[current.id]}
                   note={otherText[current.id] ?? ''}
                   onChange={(value) => {
-                    setInterim('')
                     if (typeof value === 'string') spokenRef.current[current.id] = value
                     setAnswers((prev) => ({ ...prev, [current.id]: value }))
                   }}
@@ -411,16 +407,20 @@ export function Assess() {
                   autoStart
                   listenKey={current.id}
                   maxListenMs={isIntroStep ? 60_000 : undefined}
-                  onInterim={setInterim}
                   onFinal={(text) => {
-                    setInterim('')
                     applyVoice(text)
                   }}
-                  onStopped={() => {
+                  onStarted={() => {
+                    voiceLock.current = false
+                  }}
+                  onStopped={(replacement) => {
                     if (!current || normalizeType(current.type) !== 'text') return
+                    voiceLock.current = true
                     const questionId = current.id
-                    const raw = (spokenRef.current[questionId] || '').trim()
+                    const raw = (replacement?.trim() || spokenRef.current[questionId] || '').trim()
                     if (raw.length < 8) return
+                    spokenRef.current[questionId] = raw
+                    setAnswers((prev) => ({ ...prev, [questionId]: raw }))
                     setBusy(true)
                     void cleanVoiceTranscript(raw)
                       .then((result) => {
@@ -428,19 +428,11 @@ export function Assess() {
                         if (!text) return
                         spokenRef.current[questionId] = text
                         setAnswers((prev) => ({ ...prev, [questionId]: text }))
-                        setInterim('')
                       })
                       .catch(() => {})
                       .finally(() => setBusy(false))
                   }}
                 />
-                <p className="mt-2 text-sm text-pbs-600">
-                  {phase === 'story'
-                    ? 'Listening is on. Speak about yourself and your business, then tap stop.'
-                    : normalizeType(current.type) === 'multichoice'
-                      ? 'Say several options (e.g. “A and B”). You can also tap to select.'
-                      : 'Speak an option or a longer answer. You can still edit it.'}
-                </p>
               </div>
             </div>
             {error && <p className="rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>}
