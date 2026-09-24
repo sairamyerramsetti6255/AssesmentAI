@@ -1,5 +1,87 @@
 import { transcribeAudioBlob } from './api.ts'
 
+type Recognition = {
+  lang: string
+  continuous: boolean
+  interimResults: boolean
+  start: () => void
+  stop: () => void
+  onresult: ((event: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null
+  onerror: ((event: { error?: string }) => void) | null
+  onend: (() => void) | null
+}
+
+function recognitionCtor(): (new () => Recognition) | null {
+  const host = window as Window & {
+    SpeechRecognition?: new () => Recognition
+    webkitSpeechRecognition?: new () => Recognition
+  }
+  return host.SpeechRecognition ?? host.webkitSpeechRecognition ?? null
+}
+
+export function liveVoiceSupported(): boolean {
+  return recognitionCtor() !== null
+}
+
+/** Streams words as they are spoken. Restarts when the browser ends a session. */
+export function startLiveVoice(
+  onText: (text: string, final: boolean) => void,
+  onEnd: () => void,
+): () => void {
+  const Ctor = recognitionCtor()
+  if (!Ctor) {
+    onEnd()
+    return () => {}
+  }
+  let stopped = false
+  const recognition = new Ctor()
+  recognition.lang = 'en-IN'
+  recognition.continuous = true
+  recognition.interimResults = true
+  recognition.onresult = (event) => {
+    let interim = ''
+    let finalText = ''
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const piece = event.results[i][0].transcript
+      if (event.results[i].isFinal) finalText += `${piece} `
+      else interim += piece
+    }
+    if (interim.trim()) onText(interim.trim(), false)
+    if (finalText.trim()) onText(finalText.trim(), true)
+  }
+  recognition.onerror = (event) => {
+    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+      stopped = true
+      onEnd()
+    }
+  }
+  recognition.onend = () => {
+    if (stopped) {
+      onEnd()
+      return
+    }
+    try {
+      recognition.start()
+    } catch {
+      onEnd()
+    }
+  }
+  try {
+    recognition.start()
+  } catch {
+    onEnd()
+  }
+  return () => {
+    stopped = true
+    recognition.onend = null
+    try {
+      recognition.stop()
+    } catch {
+      /* already stopped */
+    }
+  }
+}
+
 export function microphoneSupported(): boolean {
   return Boolean(typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia)
 }

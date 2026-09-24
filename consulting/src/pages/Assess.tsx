@@ -391,21 +391,27 @@ export function Assess() {
               <div className="mt-6">
                 <QuestionControl
                   question={current}
-                  value={answers[current.id]}
+                  value={
+                    normalizeType(current.type) === 'text'
+                      ? appendText(typeof answers[current.id] === 'string' ? (answers[current.id] as string) : '', interim)
+                      : answers[current.id]
+                  }
                   note={otherText[current.id] ?? ''}
-                  onChange={(value) => setAnswers((prev) => ({ ...prev, [current.id]: value }))}
+                  onChange={(value) => {
+                    setInterim('')
+                    setAnswers((prev) => ({ ...prev, [current.id]: value }))
+                  }}
                   onNote={(value) => setOtherText((prev) => ({ ...prev, [current.id]: value }))}
                 />
               </div>
-              {interim && isIntroStep && <p className="mt-3 text-sm text-pbs-600">Hearing: {interim}</p>}
               <div className="mt-6">
                 <VoiceButton
                   autoStart
                   listenKey={current.id}
                   maxListenMs={isIntroStep ? 60_000 : undefined}
-                  onInterim={isIntroStep ? setInterim : undefined}
+                  onInterim={setInterim}
                   onFinal={(text) => {
-                    if (isIntroStep) setInterim('')
+                    setInterim('')
                     applyVoice(text)
                   }}
                 />

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { microphoneSupported, startRecording, transcribeBlobWithSarvam, type RecordingSession } from '../lib/speech.ts'
+import { liveVoiceSupported, microphoneSupported, startLiveVoice, startRecording, transcribeBlobWithSarvam, type RecordingSession } from '../lib/speech.ts'
 
 interface Props {
   onFinal: (text: string) => void
@@ -12,6 +12,7 @@ interface Props {
 
 export function VoiceButton({
   onFinal,
+  onInterim,
   autoStart = false,
   listenKey,
   maxListenMs,
@@ -21,6 +22,7 @@ export function VoiceButton({
   const [hint, setHint] = useState('')
   const [level, setLevel] = useState(0)
   const recordingRef = useRef<RecordingSession | null>(null)
+  const stopLiveRef = useRef<(() => void) | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastListenKey = useRef<string | null>(null)
   const busyRef = useRef(false)
@@ -32,30 +34,35 @@ export function VoiceButton({
     }
   }
 
+  const stopLive = () => {
+    stopLiveRef.current?.()
+    stopLiveRef.current = null
+  }
+
   const finish = async () => {
     if (busyRef.current) return
     busyRef.current = true
     clearTimer()
+    stopLive()
     setListening(false)
-    setProcessing(true)
-    setHint('Turning your voice into text…')
     setLevel(0)
+    const session = recordingRef.current
+    recordingRef.current = null
+    if (!session) {
+      busyRef.current = false
+      return
+    }
+    setProcessing(true)
+    setHint('Checking the recording…')
     try {
-      const blob = await recordingRef.current?.stop()
-      recordingRef.current = null
-      if (!blob || blob.size < 400) {
-        setHint('We did not hear enough. Speak a little longer, then tap stop.')
-        return
+      const blob = await session.stop()
+      if (blob && blob.size >= 400) {
+        const text = (await transcribeBlobWithSarvam(blob)).trim()
+        if (text) onFinal(text)
       }
-      const text = (await transcribeBlobWithSarvam(blob)).trim()
-      if (!text) {
-        setHint('We could not make out the words. Please speak again, closer to the microphone.')
-        return
-      }
-      onFinal(text)
       setHint('')
     } catch {
-      setHint('Voice could not be converted just now. Please speak again or type your answer.')
+      setHint('')
     } finally {
       setProcessing(false)
       busyRef.current = false
@@ -63,22 +70,42 @@ export function VoiceButton({
   }
 
   const start = async () => {
-    if (busyRef.current || listening) return
-    if (!microphoneSupported()) {
+    if (busyRef.current) return
+    setHint('Allow the microphone if your browser asks.')
+    if (liveVoiceSupported()) {
+      stopLive()
+      setListening(true)
+      stopLiveRef.current = startLiveVoice(
+        (text, final) => {
+          if (final) {
+            onInterim?.('')
+            onFinal(text)
+          } else {
+            onInterim?.(text)
+          }
+        },
+        () => setListening(false),
+      )
+    }
+    if (microphoneSupported()) {
+      const session = startRecording(setLevel)
+      recordingRef.current = session
+      const ok = await session.ready
+      if (!ok) {
+        recordingRef.current = null
+        if (!liveVoiceSupported()) {
+          setListening(false)
+          setHint('Microphone permission was blocked. Allow it, then tap Answer by voice.')
+          return
+        }
+      } else if (!liveVoiceSupported()) {
+        setListening(true)
+      }
+    } else if (!liveVoiceSupported()) {
       setHint('This browser cannot use the microphone. Type your answer instead.')
       return
     }
-    setHint('Allow the microphone if your browser asks.')
-    const session = startRecording(setLevel)
-    recordingRef.current = session
-    const ok = await session.ready
-    if (!ok) {
-      recordingRef.current = null
-      setHint('Microphone permission was blocked. Allow it, then tap Answer by voice.')
-      return
-    }
-    setListening(true)
-    setHint('Listening. Speak clearly, then tap stop.')
+    setHint('Listening. Your words appear as you speak.')
     if (maxListenMs && maxListenMs > 0) {
       timerRef.current = setTimeout(() => void finish(), maxListenMs)
     }
@@ -92,8 +119,10 @@ export function VoiceButton({
     void start()
     return () => {
       clearTimer()
+      stopLive()
       void recordingRef.current?.stop()
       recordingRef.current = null
+      lastListenKey.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoStart, listenKey])
