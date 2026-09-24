@@ -1,5 +1,5 @@
-# Prototype admin is a single-page app. Routes like /login and /assessment
-# have no file on disk, so a refresh must serve index.html.
+# Consulting site is a single-page app. /assess has no file on disk.
+# Apache must serve index.html so a refresh stays in the app.
 Options -MultiViews
 DirectoryIndex index.html
 

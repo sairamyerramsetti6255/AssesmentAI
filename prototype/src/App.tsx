@@ -6,6 +6,7 @@ import { Overview } from './pages/Overview'
 import { LeadIntake } from './pages/LeadIntake'
 import { LeadResearch } from './pages/LeadResearch'
 import { AssessmentWorkspace } from './pages/AssessmentWorkspace'
+import { ConsultingAssessments } from './pages/ConsultingAssessments'
 import { ClientResponse } from './pages/ClientResponse'
 import { Pipeline } from './pages/Pipeline'
 import { Proposal } from './pages/Proposal'
@@ -31,6 +32,7 @@ export default function App() {
               <Route path="intake" element={<LeadIntake />} />
               <Route path="research" element={<LeadResearch />} />
               <Route path="assessment" element={<AssessmentWorkspace />} />
+              <Route path="assessments" element={<ConsultingAssessments />} />
               <Route path="review" element={<Navigate to="/assessment" replace />} />
               <Route path="client-response" element={<ClientResponse />} />
               <Route path="delivery" element={<Navigate to="/client-response" replace />} />

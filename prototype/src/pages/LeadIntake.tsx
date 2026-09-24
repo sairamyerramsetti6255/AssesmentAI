@@ -1,15 +1,11 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
-import {
-  defaultLeadIntakeForm,
-  leadIntakeFormSamples,
-} from '../data/testData'
 import { UploadedDocumentsTable } from '../components/UploadedDocumentsTable'
 import { IndustryVerticalField } from '../components/IndustryVerticalField'
 import { PageSection } from '../components/page-layout'
 import { resolveIndustryVertical } from '../data/industry-verticals'
-import { documentFromFile, normalizeDocuments } from '../lib/documents'
+import { documentFromFile } from '../lib/documents'
 import type { LeadStatus, LeadType } from '../types'
 import { leadStatusOptions, leadTypeOptions } from '../data/constants'
 import { Button, Input, PageHeader, Select } from '../components/ui'
@@ -31,31 +27,7 @@ export function LeadIntake() {
     leadType: 'inbound' as LeadType,
   })
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
-  const [sampleIndex, setSampleIndex] = useState(0)
   const [createdName, setCreatedName] = useState<string | null>(null)
-
-  const fillTestData = (index = sampleIndex) => {
-    const sample = leadIntakeFormSamples[index % leadIntakeFormSamples.length]
-    setForm({
-      companyName: sample.companyName,
-      industry: sample.industry,
-      industryOther: sample.industry.startsWith('Other') ? sample.industry : '',
-      domain: sample.domain,
-      country: sample.country,
-      clientEmail: sample.clientEmail,
-      clientPhone: sample.clientPhone,
-      availableTime: sample.availableTime,
-      intakeRemarks: sample.intakeRemarks,
-      leadStatus: sample.leadStatus,
-      leadType: sample.leadType,
-    })
-    setPendingFiles(
-      sample.documents.map(
-        (name) => new File([`Sample content for ${name}`], name, { type: 'text/plain' }),
-      ),
-    )
-    setSampleIndex((index + 1) % leadIntakeFormSamples.length)
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -108,11 +80,6 @@ export function LeadIntake() {
       <PageHeader
         title="Lead Intake"
         description="Register a new company and contact details. Research and assessment happen on the next steps."
-        actions={
-          <Button variant="secondary" onClick={() => fillTestData()}>
-            Fill test data
-          </Button>
-        }
       />
 
       {createdName && (
@@ -224,20 +191,6 @@ export function LeadIntake() {
                 }}
               />
             </label>
-            <Button
-              type="button"
-              variant="ghost"
-              className="mt-2 !text-xs"
-              onClick={() =>
-                setPendingFiles(
-                  normalizeDocuments(defaultLeadIntakeForm.documents, 'intake').map(
-                    (d) => new File([`Sample: ${d.name}`], d.name, { type: 'text/plain' }),
-                  ),
-                )
-              }
-            >
-              Add sample documents
-            </Button>
             {pendingPreview.length > 0 && (
               <div className="mt-4 text-left">
                 <UploadedDocumentsTable documents={pendingPreview} emptyMessage="" />
@@ -247,9 +200,6 @@ export function LeadIntake() {
           <div className="flex gap-2">
             <Button type="submit" className="flex-1">
               Create lead
-            </Button>
-            <Button type="button" variant="secondary" onClick={() => fillTestData()}>
-              Load sample
             </Button>
           </div>
         </form>

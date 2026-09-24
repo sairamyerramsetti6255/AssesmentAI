@@ -26,6 +26,7 @@ const navGroups: { title: string; items: NavItem[] }[] = [
       { to: '/intake', label: 'Lead Intake', roles: ['super_admin', 'team_lead', 'account_executive'] },
       { to: '/research', label: 'Agent Research', roles: ['super_admin', 'team_lead', 'account_executive'] },
       { to: '/assessment', label: 'Assessment', roles: ['super_admin', 'team_lead', 'account_executive'] },
+      { to: '/assessments', label: 'Assessments', roles: ['super_admin', 'team_lead', 'account_executive'] },
       { to: '/client-response', label: 'Client Response', roles: ['super_admin', 'team_lead', 'account_executive'] },
       { to: '/proposal', label: 'Blueprint & Proposal', roles: ['super_admin', 'team_lead', 'account_executive'] },
     ],

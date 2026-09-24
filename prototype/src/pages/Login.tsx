@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
 import { PbsLogo } from '../components/brand/PbsLogo'
 import { Button, Input } from '../components/ui'
@@ -96,13 +96,6 @@ export function Login() {
               Continue
             </Button>
           </form>
-
-          <p className="mt-8 text-center text-xs text-stone-500">
-            Clients use their secure assessment link.{' '}
-            <Link to="/portal/prt-demo-8f3a" className="font-medium text-pbs-600 hover:underline">
-              Demo portal
-            </Link>
-          </p>
         </div>
       </div>
     </div>

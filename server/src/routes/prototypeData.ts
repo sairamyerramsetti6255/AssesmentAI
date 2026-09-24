@@ -9,7 +9,7 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
-import { requireDb } from '../lib/db.js';
+import { pool, requireDb } from '../lib/db.js';
 import { demoDocumentContent, readLeadDocumentFile, saveLeadDocumentFile } from '../lib/documentStore.js';
 import { getClientResponseRows, syncClientResponseRows } from '../lib/clientResponses.js';
 import { notifyAssessmentReceived } from '../lib/zeptomail.js';
@@ -239,6 +239,88 @@ router.delete('/users/:id', async (req: Request, res: Response) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // LEADS
 // ═══════════════════════════════════════════════════════════════════════════
+
+router.get('/consulting-assessments', async (_req: Request, res: Response) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+    const { rows } = await pool.query<Record<string, unknown>>(
+      `SELECT l.id, l.company_name, l.industry, l.domain, l.client_email, l.client_phone,
+              l.intake_remarks, l.client_progress, l.client_assessment_submitted_at, l.created_at,
+              l.client_answers, l.client_richtext, l.client_other_text, l.ai_research,
+              q.id AS question_id, q.text AS question_text, q.type AS question_type,
+              q.options AS question_options, q.sort_order
+         FROM leads l
+         LEFT JOIN prototype_questions q ON q.lead_id = l.id
+        WHERE l.intake_remarks ILIKE 'Contact:%'
+          AND l.company_name !~* 'gr[ae]y[[:space:]]*logic'
+          AND COALESCE(l.client_email, '') !~* '(graylogic|grey[[:space:]]*logic|test@example\\.com|sairamyerramsetti)'
+          AND l.company_name !~* '^(aurora health|nova health|acme financial|pacific retail|pilot logistics|nordic logistics|helix manufacturing|summit financial)'
+          AND l.company_name !~* '^(na|n/?a|test)([[:space:]]|$)'
+        ORDER BY l.created_at DESC, q.sort_order ASC NULLS LAST`,
+    );
+
+    const byId = new Map<string, Record<string, unknown>>();
+    for (const row of rows) {
+      const id = String(row.id);
+      let item = byId.get(id);
+      if (!item) {
+        const remarks = String(row.intake_remarks ?? '');
+        const contact = remarks.match(/^Contact:\s*(.+)$/m)?.[1]?.trim() ?? '';
+        const story = remarks.split(/\n\n/).slice(1).join('\n\n').trim();
+        const research = row.ai_research && typeof row.ai_research === 'object'
+          ? (row.ai_research as Record<string, unknown>)
+          : null;
+        item = {
+          id,
+          companyName: String(row.company_name ?? ''),
+          industry: String(row.industry ?? ''),
+          website: String(row.domain ?? ''),
+          contactName: contact,
+          email: String(row.client_email ?? ''),
+          phone: String(row.client_phone ?? ''),
+          story,
+          progress: Number(row.client_progress ?? 0),
+          submittedAt: row.client_assessment_submitted_at ?? null,
+          createdAt: row.created_at,
+          research: research
+            ? {
+                executiveBrief: String(research.executiveBrief ?? ''),
+                competitors: Array.isArray(research.competitors) ? research.competitors.map(String) : [],
+                webInsights: Array.isArray(research.webInsights) ? research.webInsights.map(String) : [],
+                pagesCrawled:
+                  research._status && typeof research._status === 'object' && typeof (research._status as { pagesCrawled?: unknown }).pagesCrawled === 'number'
+                    ? (research._status as { pagesCrawled: number }).pagesCrawled
+                    : null,
+              }
+            : null,
+          questions: [],
+        };
+        byId.set(id, item);
+      }
+      if (!row.question_id) continue;
+      const answers = (row.client_answers ?? {}) as Record<string, unknown>;
+      const richtext = (row.client_richtext ?? {}) as Record<string, unknown>;
+      const other = (row.client_other_text ?? {}) as Record<string, unknown>;
+      const qid = String(row.question_id);
+      const raw = answers[qid];
+      const extra = [richtext[qid], other[qid]].filter((v) => v != null && String(v).trim()).map(String);
+      let answer = '';
+      if (Array.isArray(raw)) answer = raw.map(String).join(', ');
+      else if (raw != null && String(raw).trim()) answer = String(raw);
+      if (extra.length) answer = answer ? `${answer}\n${extra.join('\n')}` : extra.join('\n');
+      (item.questions as Record<string, unknown>[]).push({
+        id: qid,
+        text: String(row.question_text ?? ''),
+        type: String(row.question_type ?? ''),
+        options: Array.isArray(row.question_options) ? row.question_options.map(String) : [],
+        sortOrder: Number(row.sort_order ?? 0),
+        answer,
+      });
+    }
+
+    res.json([...byId.values()]);
+  } catch (e) { err(res, e); }
+});
 
 router.get('/leads', async (_req: Request, res: Response) => {
   try {

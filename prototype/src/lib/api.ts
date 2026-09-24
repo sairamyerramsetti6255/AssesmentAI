@@ -97,6 +97,38 @@ export function getLeads(): Promise<Lead[]> {
   return request('/api/proto/leads')
 }
 
+export type ConsultingAssessment = {
+  id: string
+  companyName: string
+  industry: string
+  website: string
+  contactName: string
+  email: string
+  phone: string
+  story: string
+  progress: number
+  submittedAt: string | null
+  createdAt: string
+  research: {
+    executiveBrief: string
+    competitors: string[]
+    webInsights: string[]
+    pagesCrawled: number | null
+  } | null
+  questions: {
+    id: string
+    text: string
+    type: string
+    options: string[]
+    sortOrder: number
+    answer: string
+  }[]
+}
+
+export function getConsultingAssessments(): Promise<ConsultingAssessment[]> {
+  return request('/api/proto/consulting-assessments')
+}
+
 export function getLead(id: string): Promise<Lead> {
   return request(`/api/proto/leads/${id}`).then((r) => dbToLead(r as unknown as DbLead))
 }

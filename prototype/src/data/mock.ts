@@ -1,4 +1,3 @@
-import { normalizeDocuments } from '../lib/documents'
 import type {
   AssessmentQuestion,
   DriverHeatmap,
@@ -6,7 +5,6 @@ import type {
   Lead,
   UseCase,
 } from '../types'
-import { clientAssessmentByLeadId, clientAssessmentByToken } from './testData'
 
 export const CURRENT_USER = {
   name: 'Sarah Chen',
@@ -47,109 +45,7 @@ export const executives: Executive[] = [
   },
 ]
 
-export const initialLeads: Lead[] = [
-  {
-    id: 'lead-1',
-    companyName: 'Nordic Logistics AB',
-    industry: 'Supply Chain',
-    domain: 'nordiclogistics.se',
-    country: 'Sweden',
-    assignedExecutive: 'Sarah Chen',
-    funnelStatus: 'review',
-    createdAt: '2026-05-28',
-    lastInteraction: '2026-06-04',
-    documents: normalizeDocuments(['architecture-overview.pdf', 'discovery-notes.docx'], 'intake'),
-    researchProgress: 100,
-    assessmentStatus: 'draft',
-    remarks: [
-      'Strong interest in warehouse automation pilots.',
-      'Follow-up call 12 Jun — demo agentic workflow on sample shipment dataset.',
-    ],
-    clientAnswers: clientAssessmentByLeadId['lead-1']?.answers,
-    clientRichtext: clientAssessmentByLeadId['lead-1']?.richtext,
-  },
-  {
-    id: 'lead-2',
-    companyName: 'Pacific Retail Group',
-    industry: 'Retail',
-    domain: 'pacificretail.com.au',
-    country: 'Australia',
-    assignedExecutive: 'Marcus Webb',
-    funnelStatus: 'client_portal',
-    createdAt: '2026-05-20',
-    lastInteraction: '2026-06-03',
-    documents: normalizeDocuments(['data-governance-framework.pdf'], 'intake'),
-    researchProgress: 100,
-    assessmentStatus: 'approved',
-    portalToken: 'prt-demo-8f3a',
-    clientProgress: 62,
-    remarks: [
-      'CIO requested competitor benchmarking on inventory AI.',
-      'Competitor benchmark shared — client prefers phased rollout vs. big-bang.',
-    ],
-    clientAnswers: clientAssessmentByToken['prt-demo-8f3a']?.answers,
-    clientRichtext: clientAssessmentByToken['prt-demo-8f3a']?.richtext,
-  },
-  {
-    id: 'lead-3',
-    companyName: 'Helix Manufacturing',
-    industry: 'Manufacturing',
-    domain: 'helixmfg.com',
-    country: 'United States',
-    assignedExecutive: 'Sarah Chen',
-    funnelStatus: 'intake',
-    createdAt: '2026-06-02',
-    lastInteraction: '2026-06-02',
-    documents: normalizeDocuments([], 'intake'),
-    researchProgress: 0,
-    assessmentStatus: 'draft',
-    remarks: [],
-  },
-  {
-    id: 'lead-4',
-    companyName: 'Summit Financial Services',
-    industry: 'Financial Services',
-    domain: 'summitfs.co.uk',
-    country: 'United Kingdom',
-    assignedExecutive: 'Elena Vasquez',
-    funnelStatus: 'proposal',
-    createdAt: '2026-04-15',
-    lastInteraction: '2026-06-01',
-    documents: normalizeDocuments(['risk-assessment.pdf', 'legacy-core-diagram.pdf'], 'intake'),
-    researchProgress: 100,
-    assessmentStatus: 'approved',
-    portalToken: 'sfs-demo-2c91',
-    clientProgress: 100,
-    remarks: [
-      'Board review scheduled for Q3 pilot approval.',
-      'MD sponsor wants RAG on policy corpus first; scoring models deferred to 2027.',
-    ],
-    clientAnswers: clientAssessmentByToken['sfs-demo-2c91']?.answers,
-    clientRichtext: clientAssessmentByToken['sfs-demo-2c91']?.richtext,
-  },
-  {
-    id: 'lead-5',
-    companyName: 'Aurora Health Systems',
-    industry: 'Healthcare',
-    domain: 'aurorahealth.io',
-    country: 'Canada',
-    assignedExecutive: 'Sarah Chen',
-    funnelStatus: 'research',
-    createdAt: '2026-06-04',
-    lastInteraction: '2026-06-04',
-    documents: normalizeDocuments(
-      [
-        'clinical-data-map-v2.pdf',
-        'hipaa-gap-assessment.docx',
-        'legacy-ehr-integration-diagram.pdf',
-      ],
-      'intake',
-    ),
-    researchProgress: 45,
-    assessmentStatus: 'draft',
-    remarks: ['Clinical informatics lead assigned as technical champion.'],
-  },
-]
+export const initialLeads: Lead[] = []
 
 export const generatedQuestions: AssessmentQuestion[] = [
   {
